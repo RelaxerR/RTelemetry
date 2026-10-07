@@ -3,66 +3,86 @@ using RTelemetry.Contracts;
 
 namespace RTelemetry.Client.Storage;
 
-/// <summary>
-/// Хранение в папке приложения: <c>state.json</c> и <c>queue.json</c>.
-/// Запись атомарная (временный файл + замена), чтобы обрыв не портил очередь.
-/// </summary>
+/// <summary>Atomic state and bounded queue files. Use one storage instance per directory.</summary>
 public sealed class FileTelemetryStorage : ITelemetryStorage
 {
     private readonly string _statePath;
     private readonly string _queuePath;
+    private readonly long _maxQueueBytes;
     private readonly object _gate = new();
 
-    public FileTelemetryStorage(string directory)
+    public FileTelemetryStorage(string directory, long maxQueueBytes = 16 * 1024 * 1024)
     {
-        if (string.IsNullOrWhiteSpace(directory))
-        {
-            throw new ArgumentException("Storage directory is required.", nameof(directory));
-        }
-
+        if (string.IsNullOrWhiteSpace(directory)) throw new ArgumentException("Storage directory is required.", nameof(directory));
+        if (maxQueueBytes < 2) throw new ArgumentOutOfRangeException(nameof(maxQueueBytes));
         var root = Path.Combine(directory, "rtelemetry");
         Directory.CreateDirectory(root);
         _statePath = Path.Combine(root, "state.json");
         _queuePath = Path.Combine(root, "queue.json");
+        _maxQueueBytes = maxQueueBytes;
+        // A temp file was never committed. Never resurrect it after consent withdrawal.
+        File.Delete(_statePath + ".tmp");
+        File.Delete(_queuePath + ".tmp");
     }
 
-    public ClientState? LoadState() => Read<ClientState>(_statePath);
+    public ClientState? LoadState()
+    {
+        var state = Read<ClientState>(_statePath, 4096);
+        return state is { InstallId: var id } && id != Guid.Empty && Enum.IsDefined(state.Consent) ? state : null;
+    }
 
-    public void SaveState(ClientState state) => Write(_statePath, state);
+    public void SaveState(ClientState state)
+    {
+        lock (_gate) Write(_statePath, JsonSerializer.SerializeToUtf8Bytes(state, TelemetryProtocol.JsonOptions));
+    }
 
-    public IReadOnlyList<TelemetryEvent> LoadQueue() => Read<List<TelemetryEvent>>(_queuePath) ?? [];
+    public IReadOnlyList<TelemetryEvent> LoadQueue() =>
+        (Read<List<TelemetryEvent>>(_queuePath, _maxQueueBytes) ?? [])
+        .Where(e => e is not null && e.Id != Guid.Empty && TelemetrySchema.IsValidName(e.Name)).ToList();
 
     public void SaveQueue(IReadOnlyList<TelemetryEvent> events)
     {
-        if (events.Count == 0)
+        lock (_gate)
         {
-            ClearQueue();
-            return;
+            // Serialize each event once; retain the newest suffix that fits, including JSON delimiters.
+            var records = new List<byte[]>();
+            long bytes = 2;
+            for (var i = events.Count - 1; i >= 0; i--)
+            {
+                var record = JsonSerializer.SerializeToUtf8Bytes(events[i], TelemetryProtocol.JsonOptions);
+                var next = bytes + record.Length + (records.Count > 0 ? 1 : 0);
+                if (next > _maxQueueBytes) break;
+                bytes = next;
+                records.Add(record);
+            }
+            if (records.Count == 0) { ClearQueue(); return; }
+            using var output = new MemoryStream();
+            output.WriteByte((byte)'[');
+            for (var i = records.Count - 1; i >= 0; i--)
+            {
+                if (i != records.Count - 1) output.WriteByte((byte)',');
+                output.Write(records[i]);
+            }
+            output.WriteByte((byte)']');
+            Write(_queuePath, output.ToArray());
         }
-
-        Write(_queuePath, events);
     }
 
     public void ClearQueue()
     {
         lock (_gate)
         {
-            if (File.Exists(_queuePath))
-            {
-                File.Delete(_queuePath);
-            }
+            File.Delete(_queuePath);
+            File.Delete(_queuePath + ".tmp");
         }
     }
 
-    private T? Read<T>(string path)
+    private T? Read<T>(string path, long maxBytes)
     {
         lock (_gate)
         {
-            if (!File.Exists(path))
-            {
-                return default;
-            }
-
+            if (!File.Exists(path)) return default;
+            if (new FileInfo(path).Length > maxBytes) { File.Delete(path); return default; }
             try
             {
                 using var stream = File.OpenRead(path);
@@ -70,23 +90,24 @@ public sealed class FileTelemetryStorage : ITelemetryStorage
             }
             catch (JsonException)
             {
-                // Повреждённый файл не должен ломать приложение: начинаем с чистого листа.
+                File.Delete(path);
                 return default;
             }
         }
     }
 
-    private void Write<T>(string path, T value)
+    private static void Write(string path, byte[] data)
     {
-        lock (_gate)
+        var temp = path + ".tmp";
+        try
         {
-            var temp = path + ".tmp";
-            using (var stream = File.Create(temp))
+            using (var stream = new FileStream(temp, FileMode.Create, FileAccess.Write, FileShare.None))
             {
-                JsonSerializer.Serialize(stream, value, TelemetryProtocol.JsonOptions);
+                stream.Write(data);
+                stream.Flush(flushToDisk: true);
             }
-
             File.Move(temp, path, overwrite: true);
         }
+        finally { File.Delete(temp); }
     }
 }

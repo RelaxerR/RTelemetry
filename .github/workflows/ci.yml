@@ -46,7 +46,12 @@ jobs:
         with:
           dotnet-version: '10.0.x'
       - run: dotnet workload install maui-windows
-      - run: dotnet build src/RTelemetry.Maui -c Release -p:TargetFrameworks=net10.0-windows10.0.19041.0 -warnaserror
+      - run: dotnet build src/RTelemetry.Maui -c Release -p:RTelemetryMauiTargetFrameworks=net10.0-windows10.0.19041.0 -warnaserror
+      - run: dotnet pack src/RTelemetry.Maui -c Release -p:RTelemetryMauiTargetFrameworks=net10.0-windows10.0.19041.0 -o artifacts/windows
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-nuget
+          path: artifacts/windows/*nupkg
   pack:
     needs: [core, maui, windows]
     runs-on: macos-latest
@@ -70,6 +75,11 @@ jobs:
           for project in Contracts Client Input Maui; do
             dotnet pack "src/RTelemetry.$project" -c Release -o artifacts/packages
           done
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-nuget
+          path: artifacts/windows
+      - run: python3 eng/merge-maui-packages.py artifacts/packages artifacts/windows
       - uses: actions/upload-artifact@v4
         with:
           name: nuget-packages

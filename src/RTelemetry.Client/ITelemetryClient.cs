@@ -3,6 +3,11 @@ namespace RTelemetry.Client;
 /// <summary>Публичный API клиента телеметрии. Все методы безопасны для вызова из UI-потока.</summary>
 public interface ITelemetryClient
 {
+    /// <summary>Resume the session, rotating its ID after SessionTimeout in the background.</summary>
+    void OnForeground();
+    /// <summary>Record session end and flush when the application enters the background.</summary>
+    Task OnBackgroundAsync(CancellationToken cancellationToken = default);
+
     ConsentState Consent { get; }
 
     /// <summary>Случайный идентификатор установки (не устройства и не аккаунта).</summary>

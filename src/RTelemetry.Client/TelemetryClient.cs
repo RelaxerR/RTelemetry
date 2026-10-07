@@ -191,14 +191,17 @@ public sealed class TelemetryClient : ITelemetryClient, IAsyncDisposable, IDispo
 
     public void EndSession(IReadOnlyDictionary<string, object?>? props = null)
     {
-        DateTimeOffset startedAt;
-        lock (_gate) startedAt = _sessionStartedAt;
-
-        var merged = new Dictionary<string, object?>(props ?? new Dictionary<string, object?>())
+        try
         {
-            ["duration_ms"] = (long)(_time.GetUtcNow() - startedAt).TotalMilliseconds,
-        };
-        Track(TelemetryEventNames.SessionEnd, merged);
+            var merged = new Dictionary<string, object?>(props ?? new Dictionary<string, object?>());
+            lock (_gate)
+            {
+                if (_disposed || _state.Consent != ConsentState.Granted) return;
+                merged["duration_ms"] = Math.Max(0, (long)(_time.GetUtcNow() - _sessionStartedAt).TotalMilliseconds);
+                Track(TelemetryEventNames.SessionEnd, merged);
+            }
+        }
+        catch (Exception ex) { Diagnostic($"Invalid session properties: {ex.GetType().Name}."); }
     }
 
     public void Track(string name, IReadOnlyDictionary<string, object?>? props = null)

@@ -124,6 +124,32 @@ public sealed class ReliabilityTests
     }
 
     [Fact]
+    public async Task Late_response_from_previous_install_does_not_remove_new_events()
+    {
+        var release = new TaskCompletionSource<SendResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var calls = 0;
+        var delivered = new List<TelemetryBatch>();
+        var transport = new DelegateTransport((batch, _) =>
+        {
+            delivered.Add(batch);
+            return ++calls == 1 ? release.Task : Task.FromResult(SendResult.Accepted);
+        });
+        await using var client = new TelemetryClient(Options(), transport, new InMemoryTelemetryStorage());
+        client.SetConsent(ConsentState.Granted);
+        client.Track("old");
+        var oldId = client.InstallId;
+        var flush = client.FlushAsync();
+        client.ResetInstallId();
+        client.Track("new");
+        release.SetResult(SendResult.Accepted);
+        await flush;
+        Assert.Equal(2, delivered.Count);
+        Assert.Equal(oldId, delivered[0].InstallId);
+        Assert.Equal(client.InstallId, delivered[1].InstallId);
+        Assert.Equal("new", Assert.Single(delivered[1].Events).Name);
+    }
+
+    [Fact]
     public async Task Disposed_client_and_throwing_diagnostics_do_not_throw()
     {
         var options = Options();

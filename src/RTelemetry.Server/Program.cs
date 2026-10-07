@@ -1,26 +1,64 @@
+using System.Threading.RateLimiting;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using RTelemetry.Contracts;
 using RTelemetry.Server;
 using RTelemetry.Server.Storage;
 
 var builder = WebApplication.CreateBuilder(args);
-
-// Пачка до 500 событий по 32 коротких свойства укладывается в мегабайт с запасом.
 builder.WebHost.ConfigureKestrel(kestrel => kestrel.Limits.MaxRequestBodySize = 1024 * 1024);
-
-builder.Services.Configure<TelemetryServerOptions>(builder.Configuration.GetSection(TelemetryServerOptions.SectionName));
+builder.Services.AddOptions<TelemetryServerOptions>()
+    .Bind(builder.Configuration.GetSection(TelemetryServerOptions.SectionName))
+    .Validate(o => o.RetentionDays > 0 && o.RateLimit.RequestsPerMinutePerIp > 0 && o.RateLimit.RequestsPerMinutePerProject > 0,
+        "Retention and rate limits must be positive").ValidateOnStart();
 builder.Services.AddSingleton(TimeProvider.System);
-builder.Services.AddSingleton<IEventStore, JsonLinesEventStore>();
+var storage = builder.Configuration.GetSection("RTelemetry:Storage").Get<StorageOptions>() ?? new();
+if (storage.Provider.Equals("Postgres", StringComparison.OrdinalIgnoreCase))
+{
+    builder.Services.AddDbContextFactory<TelemetryDbContext>(o => o.UseNpgsql(storage.ConnectionString));
+    builder.Services.AddSingleton<IEventStore, PostgresEventStore>();
+}
+else if (storage.Provider.Equals("JsonLines", StringComparison.OrdinalIgnoreCase))
+    builder.Services.AddSingleton<IEventStore, JsonLinesEventStore>();
+else throw new InvalidOperationException("Unknown RTelemetry:Storage:Provider");
+builder.Services.AddHostedService<RetentionService>();
+builder.Services.AddSingleton<IngestRateLimiter>();
+builder.Services.AddRateLimiter(o =>
+{
+    o.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    o.OnRejected = (context, _) => { context.HttpContext.Response.Headers.RetryAfter = "60"; return ValueTask.CompletedTask; };
+    o.AddPolicy("ingest", context => RateLimitPartition.GetFixedWindowLimiter(
+        context.Connection.RemoteIpAddress?.ToString() ?? "unknown", _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = context.RequestServices.GetRequiredService<IOptions<TelemetryServerOptions>>().Value.RateLimit.RequestsPerMinutePerIp,
+            Window = TimeSpan.FromMinutes(1), QueueLimit = 0
+        }));
+});
 builder.Services.AddRazorPages();
-
 var app = builder.Build();
-
+if (storage.Provider.Equals("Postgres", StringComparison.OrdinalIgnoreCase))
+{
+    await using var db = await app.Services.GetRequiredService<IDbContextFactory<TelemetryDbContext>>().CreateDbContextAsync();
+    await db.Database.MigrateAsync();
+}
 app.UseMiddleware<DashboardAuthMiddleware>();
-
-app.MapPost("/" + TelemetryProtocol.BatchesPath, IngestEndpoint.HandleAsync);
+app.UseRateLimiter();
+app.Use(async (context, next) =>
+{
+    if (context.Request.Path == "/v1/batches" && context.Request.ContentLength > 1024 * 1024)
+    { context.Response.StatusCode = 413; return; }
+    await next(context);
+});
+app.MapPost("/" + TelemetryProtocol.BatchesPath, IngestEndpoint.HandleAsync).RequireRateLimiting("ingest");
+app.MapDelete("/v1/admin/installs/{installId:guid}", async (Guid installId, HttpContext context,
+    IOptions<TelemetryServerOptions> options, IEventStore store, CancellationToken cancellationToken) =>
+{
+    if (!IngestEndpoint.KeyMatches(context.Request.Headers["X-RTelemetry-Admin-Key"], options.Value.AdminKey))
+        return Results.Unauthorized();
+    var deleted = await store.DeleteInstallAsync(installId, cancellationToken);
+    return Results.Ok(new { deleted });
+});
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 app.MapRazorPages();
-
 app.Run();
-
-/// <summary>Точка входа, доступная интеграционным тестам (WebApplicationFactory).</summary>
 public partial class Program;

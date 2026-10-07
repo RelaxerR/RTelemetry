@@ -82,6 +82,42 @@ public sealed class JsonLinesEventStore : IEventStore
         }
     }
 
+    public Task<int> DeleteInstallAsync(Guid installId, CancellationToken cancellationToken) =>
+        DeleteAsync(e => e.InstallId == installId, cancellationToken);
+
+    public Task<int> DeleteBeforeAsync(DateTimeOffset cutoff, CancellationToken cancellationToken) =>
+        DeleteAsync(e => e.ReceivedAtUtc < cutoff, cancellationToken);
+
+    private async Task<int> DeleteAsync(Func<StoredEvent, bool> predicate, CancellationToken cancellationToken)
+    {
+        await _writeLock.WaitAsync(cancellationToken);
+        try
+        {
+            var deleted = 0;
+            foreach (var file in Directory.EnumerateFiles(_root, "*.jsonl", SearchOption.AllDirectories))
+            {
+                var retained = new List<string>();
+                foreach (var line in await File.ReadAllLinesAsync(file, cancellationToken))
+                {
+                    StoredEvent? item;
+                    try { item = JsonSerializer.Deserialize<StoredEvent>(line, TelemetryProtocol.JsonOptions); }
+                    catch (JsonException) { continue; }
+                    if (item is not null && predicate(item)) deleted++;
+                    else retained.Add(line);
+                }
+                var temporary = file + ".tmp";
+                try
+                {
+                    await File.WriteAllLinesAsync(temporary, retained, cancellationToken);
+                    File.Move(temporary, file, overwrite: true);
+                }
+                finally { if (File.Exists(temporary)) File.Delete(temporary); }
+            }
+            return deleted;
+        }
+        finally { _writeLock.Release(); }
+    }
+
     private string FilePath(string project, DateOnly day) =>
         Path.Combine(_root, project, $"{day:yyyy-MM-dd}.jsonl");
 }

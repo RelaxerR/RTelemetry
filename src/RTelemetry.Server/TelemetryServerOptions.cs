@@ -11,6 +11,11 @@ public sealed class TelemetryServerOptions
     /// <summary>Проекты, которым разрешено присылать события: код → настройки.</summary>
     public Dictionary<string, ProjectOptions> Projects { get; set; } = new(StringComparer.Ordinal);
 
+    public StorageOptions Storage { get; set; } = new();
+    public RateOptions RateLimit { get; set; } = new();
+    public int RetentionDays { get; set; } = 90;
+    public string AdminKey { get; set; } = "";
+
     public DashboardOptions Dashboard { get; set; } = new();
 }
 
@@ -24,4 +29,15 @@ public sealed class DashboardOptions
 {
     public string User { get; set; } = "";
     public string Password { get; set; } = "";
+}
+
+public sealed class StorageOptions
+{
+    public string Provider { get; set; } = "JsonLines";
+    public string ConnectionString { get; set; } = "";
+}
+public sealed class RateOptions
+{
+    public int RequestsPerMinutePerIp { get; set; } = 120;
+    public int RequestsPerMinutePerProject { get; set; } = 600;
 }

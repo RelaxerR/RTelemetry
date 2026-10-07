@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using Microsoft.Extensions.Logging;
 
 namespace RTelemetry.Client;
 
@@ -37,6 +38,12 @@ public sealed class TelemetryClientOptions
     /// <summary>Куда сообщать о внутренних проблемах клиента. Клиент никогда не бросает исключения в хост.</summary>
     public Action<string>? OnDiagnostic { get; set; }
 
+    public TimeSpan SessionTimeout { get; set; } = TimeSpan.FromMinutes(30);
+    public TimeSpan RetryInitialDelay { get; set; } = TimeSpan.FromSeconds(2);
+    public TimeSpan RetryMaxDelay { get; set; } = TimeSpan.FromMinutes(5);
+    public long MaxQueueBytes { get; set; } = 16 * 1024 * 1024;
+    public ILogger? Logger { get; set; }
+
     internal void Validate()
     {
         if (string.IsNullOrWhiteSpace(Project)) throw new ArgumentException("Project is required.", nameof(Project));
@@ -45,6 +52,10 @@ public sealed class TelemetryClientOptions
         if (MaxBatchSize is < 1 or > Contracts.TelemetrySchema.MaxEventsPerBatch)
             throw new ArgumentOutOfRangeException(nameof(MaxBatchSize));
         if (MaxQueuedEvents < MaxBatchSize) throw new ArgumentOutOfRangeException(nameof(MaxQueuedEvents));
+        if (SessionTimeout <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(SessionTimeout));
+        if (RetryInitialDelay <= TimeSpan.Zero || RetryMaxDelay < RetryInitialDelay)
+            throw new ArgumentOutOfRangeException(nameof(RetryInitialDelay));
+        if (MaxQueueBytes < 2) throw new ArgumentOutOfRangeException(nameof(MaxQueueBytes));
         if (FlushInterval <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(FlushInterval));
     }
 

@@ -30,6 +30,7 @@ public sealed class TelemetryClient : ITelemetryClient, IAsyncDisposable, IDispo
     private string? _contentVersion;
     private Task? _loop;
     private bool _disposed;
+    private Task? _disposeTask;
     private CancellationTokenSource _consentLifetime = new();
     private DateTimeOffset? _backgroundAt;
     private bool _foreground;
@@ -344,20 +345,19 @@ public sealed class TelemetryClient : ITelemetryClient, IAsyncDisposable, IDispo
         }
     }
 
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync()
     {
-        Task? loop;
         lock (_gate)
         {
-            if (_disposed)
-            {
-                return;
-            }
-
+            if (_disposeTask is not null) return new ValueTask(_disposeTask);
             _disposed = true;
-            loop = _loop;
+            _disposeTask = DisposeCoreAsync(_loop);
+            return new ValueTask(_disposeTask);
         }
+    }
 
+    private async Task DisposeCoreAsync(Task? loop)
+    {
         Safe(_lifetime.Cancel);
         if (loop is not null)
         {

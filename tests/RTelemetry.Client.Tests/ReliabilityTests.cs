@@ -74,6 +74,10 @@ public sealed class ReliabilityTests
         await client.FlushAsync();
         Assert.Equal(2, transport.Events.Count(e => e.Name == "session.start"));
         Assert.Equal(2, transport.Events.Count(e => e.Name == "session.end"));
+        var ends = transport.Events.Where(e => e.Name == "session.end").ToList();
+        Assert.All(ends, e => Assert.Equal(first, e.SessionId));
+        Assert.Equal(0, ends[0].Props!["duration_ms"].GetInt64());
+        Assert.Equal(29 * 60 * 1000, ends[1].Props!["duration_ms"].GetInt64());
         Assert.Equal(1, transport.Events.Last().Sequence);
     }
 
@@ -150,6 +154,40 @@ public sealed class ReliabilityTests
     }
 
     [Fact]
+    public async Task Concurrent_dispose_waits_for_inflight_send_and_is_idempotent()
+    {
+        var release = new TaskCompletionSource<SendResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var transport = new DelegateTransport((_, _) => release.Task);
+        var storage = new InMemoryTelemetryStorage();
+        var client = new TelemetryClient(Options(), transport, storage);
+        client.SetConsent(ConsentState.Granted);
+        client.Track("event");
+        var flush = client.FlushAsync();
+        var dispose1 = client.DisposeAsync().AsTask();
+        var dispose2 = client.DisposeAsync().AsTask();
+        Assert.Same(dispose1, dispose2);
+        Assert.False(dispose1.IsCompleted);
+        release.SetResult(SendResult.RetryLater);
+        await Task.WhenAll(flush, dispose1, dispose2);
+        await client.DisposeAsync();
+        client.Dispose();
+        Assert.Single(storage.LoadQueue());
+    }
+
+    [Fact]
+    public async Task Throwing_logger_does_not_disable_diagnostic_callback()
+    {
+        var options = Options();
+        var diagnostics = new List<string>();
+        options.Logger = new TestLogger { Throw = true };
+        options.OnDiagnostic = diagnostics.Add;
+        await using var client = new TelemetryClient(options, new Transport(), new InMemoryTelemetryStorage());
+        client.SetConsent(ConsentState.Granted);
+        client.Track("bad name");
+        Assert.Single(diagnostics);
+    }
+
+    [Fact]
     public async Task Disposed_client_and_throwing_diagnostics_do_not_throw()
     {
         var options = Options();
@@ -193,9 +231,14 @@ public sealed class ReliabilityTests
     private sealed class TestLogger : ILogger
     {
         public int Calls;
+        public bool Throw;
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
         public bool IsEnabled(LogLevel level) => true;
-        public void Log<TState>(LogLevel level, EventId id, TState state, Exception? exception, Func<TState, Exception?, string> formatter) => Calls++;
+        public void Log<TState>(LogLevel level, EventId id, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            Calls++;
+            if (Throw) throw new InvalidOperationException("logger");
+        }
     }
 }
 

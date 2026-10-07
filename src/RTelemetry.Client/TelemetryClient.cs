@@ -31,6 +31,7 @@ public sealed class TelemetryClient : ITelemetryClient, IAsyncDisposable, IDispo
     private Task? _loop;
     private bool _disposed;
     private Task? _disposeTask;
+    private HttpClient? _ownedHttp;
     private CancellationTokenSource _consentLifetime = new();
     private DateTimeOffset? _backgroundAt;
     private bool _foreground;
@@ -75,7 +76,10 @@ public sealed class TelemetryClient : ITelemetryClient, IAsyncDisposable, IDispo
         var http = httpClient ?? new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
         var transport = new HttpTelemetryTransport(http, options.Endpoint!, options.ApiKey);
         var storage = new FileTelemetryStorage(options.StorageDirectory, options.MaxQueueBytes);
-        return new TelemetryClient(options, transport, storage);
+        return new TelemetryClient(options, transport, storage)
+        {
+            _ownedHttp = httpClient is null ? http : null,
+        };
     }
 
     public ConsentState Consent
@@ -373,6 +377,9 @@ public sealed class TelemetryClient : ITelemetryClient, IAsyncDisposable, IDispo
         await _flushLock.WaitAsync().ConfigureAwait(false);
         try { PersistQueue(); }
         finally { _flushLock.Release(); }
+        Safe(() => _ownedHttp?.Dispose());
+        _consentLifetime.Dispose();
+        _lifetime.Dispose();
     }
 
     public void Dispose() => DisposeAsync().AsTask().GetAwaiter().GetResult();

@@ -3,69 +3,63 @@
 <!doctype html>
 <html lang="ru">
 <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>RTelemetry</title>
-    <style>
-        :root { color-scheme: light dark; --muted: #888; --line: #8884; }
-        body { font: 15px/1.45 system-ui, sans-serif; margin: 0 auto; max-width: 960px; padding: 24px 16px; }
-        h1 { font-size: 22px; margin: 0 0 4px; }
-        h2 { font-size: 18px; margin: 32px 0 8px; }
-        .muted { color: var(--muted); }
-        form { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 16px 0; }
-        table { width: 100%; border-collapse: collapse; }
-        th, td { padding: 6px 8px; border-bottom: 1px solid var(--line); text-align: left; }
-        td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
-        .tiles { display: flex; gap: 24px; margin: 4px 0 12px; }
-        .tiles b { font-size: 20px; display: block; }
-    </style>
+<meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>RTelemetry — статистика</title>
+<style>
+:root { color-scheme: light dark; } body { font: 15px/1.5 system-ui,sans-serif; max-width:1100px; margin:auto; padding:24px; }
+form { display:flex; gap:12px; flex-wrap:wrap; } label { display:flex; flex-direction:column; } input,select,button { font:inherit; padding:6px; }
+table { border-collapse:collapse; width:100%; } td,th { border-bottom:1px solid #8886; text-align:left; padding:8px; overflow-wrap:anywhere; }
+.heatmap { background:#8881; width:min(100%,650px); border:1px solid #888; } code { overflow-wrap:anywhere; } .scroll { overflow:auto; }
+</style>
 </head>
 <body>
-    <h1>RTelemetry</h1>
-    <div class="muted">@Model.From.ToString("yyyy-MM-dd") — @Model.To.ToString("yyyy-MM-dd"), UTC, по дню приёма</div>
-
-    <form method="get">
-        <label>Дней <input type="number" name="days" min="1" max="90" value="@Model.Days" /></label>
-        <label>Проект <input type="text" name="project" value="@Model.Project" placeholder="все" /></label>
-        <button type="submit">Показать</button>
-    </form>
-
-    @if (Model.Projects.Count == 0)
-    {
-        <p class="muted">За период событий нет.</p>
-    }
-
-    @foreach (var p in Model.Projects)
-    {
-        <h2>@p.Project</h2>
-        <div class="tiles">
-            <div><b>@p.Events</b><span class="muted">событий</span></div>
-            <div><b>@p.Installs</b><span class="muted">установок</span></div>
-            <div><b>@p.Sessions</b><span class="muted">сессий</span></div>
-        </div>
-        <table>
-            <thead>
-                <tr>
-                    <th>Событие</th>
-                    <th class="num">Всего</th>
-                    <th class="num">Установок</th>
-                    <th class="num">Сессий</th>
-                    <th>Последнее (UTC)</th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach (var e in p.ByEvent)
-                {
-                    <tr>
-                        <td><code>@e.Name</code></td>
-                        <td class="num">@e.Count</td>
-                        <td class="num">@e.Installs</td>
-                        <td class="num">@e.Sessions</td>
-                        <td>@e.LastSeen.UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss")</td>
-                    </tr>
-                }
-            </tbody>
-        </table>
-    }
-</body>
-</html>
+<h1>RTelemetry</h1>
+<p>Период по дню приёма, UTC. Координаты касаний нормированы по странице.</p>
+<form method="get">
+<label>Проект<input name="project" value="@Model.Project" /></label>
+<label>С<input type="date" name="from" value="@Model.From?.ToString("yyyy-MM-dd")" /></label>
+<label>По<input type="date" name="to" value="@Model.To?.ToString("yyyy-MM-dd")" /></label>
+<label>Версия приложения<input name="appVersion" value="@Model.AppVersion" /></label>
+<label>Версия контента<input name="contentVersion" value="@Model.ContentVersion" /></label>
+<label>Страница<select name="screen">@foreach(var screen in Model.Screens) { <option selected="@(screen == Model.Screen)" value="@screen">@screen</option> }</select></label>
+<button>Показать</button>
+</form>
+<p><a href="@Model.FilterUrl("Csv", Model.Session)">Экспорт CSV (текущие фильтры событий)</a> · <a href="@Model.FilterUrl()">Все сессии по фильтрам</a></p>
+@if (Model.Events.Count == 0) { <p>За период событий нет.</p> }
+@foreach (var project in Model.ByProject)
+{
+<h2>@project.Key</h2>
+<p><b>@project.Count()</b> событий · <b>@project.Select(e => e.InstallId).Distinct().Count()</b> установок · <b>@project.Select(e => e.SessionId).Distinct().Count()</b> сессий</p>
+<table><thead><tr><th>Событие</th><th>Количество</th><th>Установки</th><th>Сессии</th></tr></thead><tbody>
+@foreach(var group in project.GroupBy(e => e.Name).OrderByDescending(g => g.Count()))
+{ <tr><td>@group.Key</td><td>@group.Count()</td><td>@group.Select(e => e.InstallId).Distinct().Count()</td><td>@group.Select(e => e.SessionId).Distinct().Count()</td></tr> }
+</tbody></table>
+}
+<h2>Карта касаний: @Model.Screen</h2>
+<p>Синий круг — клик, оранжевый крест — промах. Показаны первые 5000 касаний выбранной страницы; CSV содержит все события по фильтрам.</p>
+<svg class="heatmap" viewBox="0 0 1000 1000" role="img" aria-label="Карта кликов и промахов">
+@foreach(var e in Model.Touches.Take(5000))
+{
+    if(e.Name == "ui.click") { <circle cx="@IndexModel.Svg(e,"x")" cy="@IndexModel.Svg(e,"y")" r="7" fill="#2384d1" opacity=".65"><title>@IndexModel.Prop(e,"element")</title></circle> }
+    else { <g transform="translate(@IndexModel.Svg(e,"x") @IndexModel.Svg(e,"y"))" stroke="#d86512" stroke-width="4"><title>Промах: @IndexModel.Prop(e,"nearest_element")</title><path d="M-6,-6 L6,6 M-6,6 L6,-6" /></g> }
+}
+</svg>
+<h3>Промахи рядом с элементами</h3>
+<table><thead><tr><th>Элемент</th><th>Промахи</th></tr></thead><tbody>
+@foreach(var group in Model.Touches.Where(e => e.Name == "ui.miss" && IndexModel.Prop(e,"nearest_element") != "").GroupBy(e => IndexModel.Prop(e,"nearest_element")).OrderByDescending(g => g.Count()).Take(20))
+{ <tr><td>@group.Key</td><td>@group.Count()</td></tr> }
+</tbody></table>
+<h2>Сессии</h2>
+<div class="scroll"><table><thead><tr><th>Проект</th><th>Сессия</th><th>Установка</th><th>События</th><th>Начало (UTC)</th></tr></thead><tbody>
+@foreach(var group in Model.Events.GroupBy(e => new {e.Project,e.SessionId,e.InstallId}).OrderByDescending(g => g.Min(e => e.TimestampUtc)))
+{ <tr><td>@group.Key.Project</td><td><a href="@Model.FilterUrl(session:group.Key.SessionId, project:group.Key.Project)">@group.Key.SessionId</a></td><td>@group.Key.InstallId</td><td>@group.Count()</td><td>@group.Min(e => e.TimestampUtc).ToString("u")</td></tr> }
+</tbody></table></div>
+@if(Model.Session.HasValue)
+{
+<h2>Лента сессии @Model.Session</h2>
+<table><thead><tr><th>Sequence</th><th>Время UTC</th><th>Событие</th><th>Свойства</th></tr></thead><tbody>
+@foreach(var e in Model.Events.OrderBy(e => e.Sequence).ThenBy(e => e.TimestampUtc))
+{ <tr><td>@e.Sequence</td><td>@e.TimestampUtc.ToString("u")</td><td>@e.Name</td><td><code>@System.Text.Json.JsonSerializer.Serialize(e.Props)</code></td></tr> }
+</tbody></table>
+}
+</body></html>

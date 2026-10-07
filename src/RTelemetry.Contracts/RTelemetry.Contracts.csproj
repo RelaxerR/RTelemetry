@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Формат данных между клиентом и сервером. Без зависимостей, кроме BCL. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <PackageId>RTelemetry.Contracts</PackageId>
+    <Description>RTelemetry wire contract: event envelope, batch, schema limits.</Description>
+  </PropertyGroup>
+
+</Project>

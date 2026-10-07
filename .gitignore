@@ -1,0 +1,28 @@
+# Build artifacts
+bin/
+obj/
+artifacts/
+*.nupkg
+*.snupkg
+
+# IDE / user-specific
+.vs/
+.vscode/
+.idea/
+*.user
+*.userosscache
+*.suo
+*.swp
+*.DotSettings.user
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local data of the server (raw events)
+src/RTelemetry.Server/data/
+data/
+
+# Secrets
+appsettings.*.local.json
+*.env

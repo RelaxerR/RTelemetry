@@ -1,0 +1,71 @@
+@page
+@model IndexModel
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>RTelemetry</title>
+    <style>
+        :root { color-scheme: light dark; --muted: #888; --line: #8884; }
+        body { font: 15px/1.45 system-ui, sans-serif; margin: 0 auto; max-width: 960px; padding: 24px 16px; }
+        h1 { font-size: 22px; margin: 0 0 4px; }
+        h2 { font-size: 18px; margin: 32px 0 8px; }
+        .muted { color: var(--muted); }
+        form { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 16px 0; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 6px 8px; border-bottom: 1px solid var(--line); text-align: left; }
+        td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+        .tiles { display: flex; gap: 24px; margin: 4px 0 12px; }
+        .tiles b { font-size: 20px; display: block; }
+    </style>
+</head>
+<body>
+    <h1>RTelemetry</h1>
+    <div class="muted">@Model.From.ToString("yyyy-MM-dd") — @Model.To.ToString("yyyy-MM-dd"), UTC, по дню приёма</div>
+
+    <form method="get">
+        <label>Дней <input type="number" name="days" min="1" max="90" value="@Model.Days" /></label>
+        <label>Проект <input type="text" name="project" value="@Model.Project" placeholder="все" /></label>
+        <button type="submit">Показать</button>
+    </form>
+
+    @if (Model.Projects.Count == 0)
+    {
+        <p class="muted">За период событий нет.</p>
+    }
+
+    @foreach (var p in Model.Projects)
+    {
+        <h2>@p.Project</h2>
+        <div class="tiles">
+            <div><b>@p.Events</b><span class="muted">событий</span></div>
+            <div><b>@p.Installs</b><span class="muted">установок</span></div>
+            <div><b>@p.Sessions</b><span class="muted">сессий</span></div>
+        </div>
+        <table>
+            <thead>
+                <tr>
+                    <th>Событие</th>
+                    <th class="num">Всего</th>
+                    <th class="num">Установок</th>
+                    <th class="num">Сессий</th>
+                    <th>Последнее (UTC)</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var e in p.ByEvent)
+                {
+                    <tr>
+                        <td><code>@e.Name</code></td>
+                        <td class="num">@e.Count</td>
+                        <td class="num">@e.Installs</td>
+                        <td class="num">@e.Sessions</td>
+                        <td>@e.LastSeen.UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss")</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+</body>
+</html>

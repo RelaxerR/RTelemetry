@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Клиент телеметрии без зависимости от UI-фреймворка: согласие, очередь на диске,
+    батчинг и отправка. Интеграция с MAUI — отдельный пакет RTelemetry.Maui.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <PackageId>RTelemetry.Client</PackageId>
+    <Description>RTelemetry client: consent gate, offline queue, batching and HTTP delivery.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../RTelemetry.Contracts/RTelemetry.Contracts.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="RTelemetry.Client.Tests" />
+  </ItemGroup>
+
+</Project>

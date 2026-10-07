@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <!--
+    Сервер RTelemetry: приём пачек (POST /v1/batches) и простой фронт статистики (Razor Pages).
+    Хранилище пока файловое (JSON Lines по проекту и дню); PostgreSQL — следующий шаг, см. docs/server.md.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../RTelemetry.Contracts/RTelemetry.Contracts.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -35,10 +35,12 @@ builder.Services.AddRateLimiter(o =>
             Window = TimeSpan.FromMinutes(1), QueueLimit = 0
         }));
 });
-builder.Services.Configure<ForwardedHeadersOptions>(o =>
+builder.Services.AddOptions<ForwardedHeadersOptions>().Configure<IOptions<TelemetryServerOptions>>((o, telemetry) =>
 {
-    // Только доверенные loopback-прокси из настроек ASP.NET по умолчанию.
+    // Loopback доверен по умолчанию; остальные адреса добавляются явно.
     o.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    foreach (var proxy in telemetry.Value.TrustedProxies)
+        o.KnownProxies.Add(System.Net.IPAddress.Parse(proxy));
 });
 builder.Services.AddRazorPages();
 var app = builder.Build();

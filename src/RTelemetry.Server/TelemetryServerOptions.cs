@@ -15,6 +15,7 @@ public sealed class TelemetryServerOptions
     public RateOptions RateLimit { get; set; } = new();
     public int RetentionDays { get; set; } = 90;
     public string AdminKey { get; set; } = "";
+    public string[] TrustedProxies { get; set; } = [];
 
     public DashboardOptions Dashboard { get; set; } = new();
 }

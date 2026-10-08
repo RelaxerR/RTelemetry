@@ -2,8 +2,9 @@
 
 ## Что подтверждено автоматически
 
-- `dotnet test tests/RTelemetry.Input.Tests`: 13 тестов геометрии, ближайшего элемента,
-  доступности предков, перекрытий, защиты от циклов, drag, отмены и первого пальца.
+- `dotnet test tests/RTelemetry.Input.Tests`: 37 тестов геометрии, ближайшего элемента,
+  доступности предков, перекрытий, защиты от циклов, drag, отмены, первого пальца,
+  таксономии интерактивности и валидности опций.
 - `dotnet build src/RTelemetry.Maui`: Android, iOS, Mac Catalyst, без предупреждений.
 - `dotnet build samples/RTelemetry.Sample.Maui -f net10.0-maccatalyst -p:EnableCodeSigning=false`:
   сборка приложения без подписи.

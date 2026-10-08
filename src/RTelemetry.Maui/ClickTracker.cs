@@ -47,7 +47,11 @@ public sealed class ClickTracker(ITelemetryClient client, InputOptions options)
         try
         {
             var isLong = _touch.End(id, new(x,y), Stopwatch.GetElapsedTime(0));
-            if (isLong is null) return;
+            if (isLong is null)
+            {
+                if (!_touch.HasActivePointer) _pressed = null;
+                return;
+            }
             var pressed = _pressed;
             _pressed = null;
             if (client.Consent != ConsentState.Granted) return;
@@ -89,7 +93,7 @@ public sealed class ClickTracker(ITelemetryClient client, InputOptions options)
                 for (var ancestor = element.Parent as VisualElement; ancestor is not null; ancestor = ancestor.Parent as VisualElement)
                     if (ancestor is ScrollView or CollectionView || ancestor is Layout { IsClippedToBounds: true })
                         clipped = Clip(clipped, Bounds(ancestor));
-                nodes.Add(new(Describe(element),element.GetType().Name,clipped,Interactive(element) || IsSelectionHit(element,x,y),element.IsEnabled,element.IsVisible,
+                nodes.Add(new(Describe(element),element.GetType().Name,clipped,Interactive(element,x,y),element.IsEnabled,element.IsVisible,
                     parent >= nodes.Count ? -1 : parent));
             }
         return new(page,Describe(page),page.GetType().Name,bounds,Array.AsReadOnly(nodes.ToArray()));
@@ -115,7 +119,32 @@ public sealed class ClickTracker(ITelemetryClient client, InputOptions options)
         try { InputCaptured?.Invoke(name,props); } catch (Exception) { }
     }
     #pragma warning disable CS0618 // ListView remains supported for existing applications.
-    private static bool Interactive(VisualElement e) => RTelemetry.GetIsInteractive(e) || e is Button or ImageButton or CheckBox or Switch or RadioButton or Slider or Stepper or Picker or DatePicker or TimePicker or Entry or Editor || e is View v && v.GestureRecognizers.OfType<TapGestureRecognizer>().Any();
+    private static bool Interactive(VisualElement element, double x, double y)
+    {
+        var kind = element switch
+        {
+            Button => InputElementKind.Button,
+            ImageButton => InputElementKind.ImageButton,
+            CheckBox => InputElementKind.CheckBox,
+            Switch => InputElementKind.Switch,
+            RadioButton => InputElementKind.RadioButton,
+            Slider => InputElementKind.Slider,
+            Stepper => InputElementKind.Stepper,
+            Picker => InputElementKind.Picker,
+            DatePicker => InputElementKind.DatePicker,
+            TimePicker => InputElementKind.TimePicker,
+            Entry => InputElementKind.Entry,
+            Editor => InputElementKind.Editor,
+            CollectionView => InputElementKind.CollectionView,
+            ListView => InputElementKind.ListView,
+            _ => InputElementKind.Other,
+        };
+        var selectionEnabled = element is CollectionView { SelectionMode: not SelectionMode.None } or ListView { SelectionMode: not ListViewSelectionMode.None };
+        return InteractionRules.IsInteractive(kind,
+            element is View view && view.GestureRecognizers.OfType<TapGestureRecognizer>().Any(),
+            RTelemetry.GetIsInteractive(element), selectionEnabled,
+            selectionEnabled && IsSelectionHit(element,x,y));
+    }
     private static bool IsSelectionHit(VisualElement element, double x, double y)
     {
         if (element is not CollectionView { SelectionMode: not SelectionMode.None } && element is not ListView { SelectionMode: not ListViewSelectionMode.None }) return false;

@@ -30,3 +30,6 @@ appsettings.*.local.json
 # Python packaging checks
 __pycache__/
 *.py[cod]
+
+# Test runner output
+TestResults/

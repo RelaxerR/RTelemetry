@@ -47,6 +47,26 @@ PostgreSQL проверялся на отдельной временной ба�
 RTELEMETRY_TEST_POSTGRES='Host=127.0.0.1;Port=55439;Database=rtelemetry_tests;Username=rtelemetry' dotnet test RTelemetry.slnx
 ```
 
+## Завершающая проверка пакетов и безопасности
+
+В main созданы четыре nupkg и четыре snupkg в `artifacts/packages/`:
+Contracts, Client, Input и Maui, все версии 1.0.0-rc.1. Версия, MIT, README и
+icon.png проверены чтением архивов; SourceLink создан SDK. Локальный MAUI-пакет
+содержит Android/iOS/Mac Catalyst; Windows добавляет нативный CI runner.
+Sample Mac Catalyst повторно собран из окончательного main без ошибок/предупреждений.
+
+`dotnet list RTelemetry.slnx package --vulnerable --include-transitive` не обнаружил
+известных уязвимостей в восьми проектах solution по текущим данным nuget.org.
+Поиск сигнатур приватных ключей, GitHub-токенов и AWS-ключей в 116 отслеживаемых
+файлах и 184 исторических blobs не дал совпадений; это проверка сигнатур, не
+доказательство отсутствия произвольного секрета. Production-конфигурация пустая,
+найденные development/test ключи — публичные фикстуры. Реальные значения секретов
+в docker-compose/CI задаются окружением. Файлы с локальными ключами игнорируются.
+
+Временная PostgreSQL `/private/tmp/rtelemetry-release-20261008` остановлена после
+проверок. Git status чистый. Worktree и локальные артефакты сохранены. Push, тег
+и публикация не выполнялись; существующий origin не изменялся.
+
 ## Ручная проверка и ограничения среды
 
 Цепочка **физическое касание → sample → сервер → статистика не подтверждена**.
@@ -139,6 +159,7 @@ Worktree сохранены в ../RTelemetry-wt/. Интеграционные m
 
 - 7958196 docs: описать RC, захват ввода, надежность и сервер
 - ea2f34d docs: уточнить ограничения JSON Lines и доверенные прокси
+- e1d1dab docs: зафиксировать итоговые проверки и ограничения RC
 
 Итоговые согласования зависимостей, константа UiMiss, PostgreSQL CI service и проверки
 входят в release/integration; полный граф: `git log --graph --oneline --all`.

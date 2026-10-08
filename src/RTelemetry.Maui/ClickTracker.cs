@@ -48,7 +48,7 @@ public sealed class ClickTracker(ITelemetryClient client, InputOptions options)
                         clipped = Clip(clipped, Bounds(ancestor));
                 nodes.Add(new(Describe(element),element.GetType().Name,clipped,Interactive(element) || IsSelectionHit(element,x,y),element.IsEnabled,element.IsVisible,
                     parent >= nodes.Count ? -1 : parent,
-                    candidates.Contains(element) || !element.IsVisible || !element.IsEnabled));
+                    candidates.Contains(element) || clipped.Contains(new(x,y))));
             }
             var hit = HitClassifier.Classify(nodes,new(x,y),bounds);
             var props = new Dictionary<string,object?>

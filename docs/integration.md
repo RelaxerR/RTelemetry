@@ -1,100 +1,122 @@
-# Подключение к приложению
+# Подключение за пять минут
 
-## Пакет или локальный проект
+Требуется .NET 10; для MAUI — workload и платформенный SDK. Версия кандидата
+`1.0.0-rc.1`. Пакеты пока не опубликованы: сначала создайте локальный feed.
 
-Пакеты публикуются в NuGet-фид (GitHub Packages или свой). Пока RTelemetry активно меняется,
-приложение может подключать проекты напрямую, без публикации на каждое изменение.
-
-Пример для The Book Game — `Game/Game.csproj`:
-
-```xml
-<PropertyGroup>
-  <!-- true: исходники из соседней папки ../RTelemetry; false: пакет из фида -->
-  <UseLocalRTelemetry Condition="'$(UseLocalRTelemetry)' == ''">false</UseLocalRTelemetry>
-  <RTelemetryVersion>0.1.*</RTelemetryVersion>
-</PropertyGroup>
-
-<ItemGroup Condition="'$(UseLocalRTelemetry)' == 'true'">
-  <ProjectReference Include="../../RTelemetry/src/RTelemetry.Maui/RTelemetry.Maui.csproj" />
-</ItemGroup>
-<ItemGroup Condition="'$(UseLocalRTelemetry)' != 'true'">
-  <PackageReference Include="RTelemetry.Maui" Version="$(RTelemetryVersion)" />
-</ItemGroup>
+```sh
+mkdir -p artifacts/packages
+for project in Contracts Client Input Maui; do
+  dotnet pack "src/RTelemetry.$project" -c Release -o artifacts/packages
+done
+# В каталоге своего MAUI-приложения:
+dotnet add package RTelemetry.Maui --version 1.0.0-rc.1 --source /absolute/path/RTelemetry/artifacts/packages
 ```
 
-Локально: `dotnet build -p:UseLocalRTelemetry=true` или то же свойство в `Directory.Build.props`
-вне git. CI и облачные сессии берут пакет.
+Локальный pack содержит платформы текущей ОС; CI объединяет Mac и Windows
+артефакты в один пакет. После публикации достаточно убрать `--source`.
+При активной разработке вместо пакета можно добавить ProjectReference на
+`src/RTelemetry.Maui/RTelemetry.Maui.csproj`. Не включайте одновременно оба варианта.
 
-## Версии
+## Сервер для разработки
 
-SemVer по всему репозиторию (`VersionPrefix` в `Directory.Build.props`):
-patch — исправления; minor — новые API и события, обратно совместимо; major — несовместимое
-изменение API или формата (`schemaVersion`).
+```sh
+dotnet run --project src/RTelemetry.Server
+# http://localhost:5180/ — Basic dev:dev, проект dev, ключ dev-key
+```
+
+В Android emulator адрес хоста — `10.0.2.2`; для физического устройства нужен
+доступный адрес компьютера в сети. В production используйте HTTPS и отдельный
+ключ проекта. HTTP-разрешения sample предназначены только для локальной проверки.
 
 ## MAUI
 
-`MauiProgram.cs`:
+В `MauiProgram.cs` после `UseMauiApp<App>()`:
 
 ```csharp
+using RTelemetry.Maui;
+
 builder.UseRTelemetry(o =>
 {
-    o.Project = "tbg";
-    o.Endpoint = new Uri("https://telemetry.example.com/");
-    o.ApiKey = "…";
-    o.ContentVersion = StoryInfo.ContentVersion; // версия встроенной истории
-#if DEBUG
-    o.OnDiagnostic = m => System.Diagnostics.Debug.WriteLine($"[RTelemetry] {m}");
-#endif
+    o.Project = "dev";
+    o.Endpoint = new Uri("http://localhost:5180/");
+    o.ApiKey = "dev-key";
+    o.ContentVersion = "content-1";
+    o.SessionTimeout = TimeSpan.FromMinutes(30);
+    o.OnDiagnostic = message => System.Diagnostics.Debug.WriteLine(message);
+}, input =>
+{
+    input.DragThreshold = 12; // логические единицы платформы
+    input.LongPressThreshold = TimeSpan.FromMilliseconds(600);
 });
 ```
 
-`App.xaml.cs`:
+Начало сессии, фон и отправка подключаются автоматически: вызовы в App не нужны.
+`AppVersion`, `Platform` и `StorageDirectory` заполняются из MAUI; при необходимости
+их можно переопределить. `Logger` принимает ILogger, `OnDiagnostic` можно оставить
+вместе с ним. Не передавайте в диагностику персональные данные.
+
+В экране согласия получите `ITelemetryClient` из DI и только после явного решения:
 
 ```csharp
-public App(ClickTracker clicks, ITelemetryClient telemetry)
-{
-    InitializeComponent();
-    _telemetry = telemetry;
-    clicks.Attach(this);
-}
-
-protected override Window CreateWindow(IActivationState? state)
-{
-    var window = new Window(new AppShell());
-    window.Resumed += (_, _) => _telemetry.StartSession();
-    window.Stopped += async (_, _) =>
-    {
-        _telemetry.EndSession();
-        await _telemetry.FlushAsync();
-    };
-    _telemetry.StartSession();
-    return window;
-}
+telemetry.SetConsent(ConsentState.Granted);
+// Отзыв из настроек:
+telemetry.SetConsent(ConsentState.Denied);
 ```
 
-Согласие — из экрана согласия и настроек: `telemetry.SetConsent(ConsentState.Granted)` /
-`Denied`. Пока `Unknown`, клики и события не пишутся (см. `privacy.md`).
+До Granted не создаются события. Denied стирает неотправленное и отменяет текущий
+запрос; уже принятые сервером данные удаляет администратор по installId. Политика
+согласия и несовершеннолетних остаётся решением приложения: docs/privacy.md.
+
+## Идентификаторы и свои контролы
+
+Задавайте стабильный `AutomationId`, не текст или введённое значение:
+
+```xml
+<ContentPage xmlns:telemetry="clr-namespace:RTelemetry.Maui;assembly=RTelemetry.Maui">
+  <GraphicsView AutomationId="choice_canvas" telemetry:RTelemetry.IsInteractive="True" />
+</ContentPage>
+```
+
+Без AutomationId используется StyleId (в том числе назначаемый MAUI из x:Name),
+затем имя типа. Для отдельного нестандартного источника доступен
+`ClickTracker.TrackClick(element)`. Для обычных касаний он не нужен и даст дубль,
+если вызвать его поверх автоматического наблюдения.
 
 ## Смысловые события
 
-Адаптер живёт в приложении, не в RTelemetry, например `Game/Telemetry/GameTelemetry.cs`:
-
 ```csharp
-public sealed class GameTelemetry(ITelemetryClient client)
+telemetry.Track("scene.shown", new Dictionary<string, object?>
 {
-    public void SceneShown(string sceneId) =>
-        client.Track("scene.shown", new Dictionary<string, object?> { ["scene_id"] = sceneId });
-
-    public void ChoiceMade(string sceneId, string choiceId, string optionId, int index, TimeSpan latency) =>
-        client.Track("choice.made", new Dictionary<string, object?>
-        {
-            ["scene_id"] = sceneId,
-            ["choice_id"] = choiceId,
-            ["option_id"] = optionId,
-            ["option_index"] = index,
-            ["latency_ms"] = latency,
-        });
-}
+    ["scene_id"] = sceneId,
+});
+telemetry.SetContentVersion("content-2");
 ```
 
-Каталог — `events.md`. В адаптер передаются только идентификаторы, не тексты.
+Адаптер принадлежит приложению. Только id, числа и флаги — никаких реплик и
+пользовательского текста. Список событий TBG: docs/events.md.
+
+## Обычное C#-приложение
+
+```csharp
+await using var telemetry = TelemetryClient.Create(new TelemetryClientOptions
+{
+    Project = "dev", Endpoint = new Uri("http://localhost:5180/"), ApiKey = "dev-key",
+    AppVersion = "1.0", ContentVersion = "content-1",
+    StorageDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MyApp", "telemetry")
+}).Start();
+telemetry.OnForeground();
+// Согласие устанавливается вашим UI.
+// Перед уходом в фон:
+await telemetry.OnBackgroundAsync();
+```
+
+Возврат раньше SessionTimeout продолжает sessionId; после таймаута — новая
+session.start. session.end может повторяться в одной логической сессии при коротких
+уходах в фон; duration_ms накопительная, поэтому её нельзя суммировать.
+
+## Пример и проверка
+
+`samples/RTelemetry.Sample.Maui` содержит все поддержанные типы контролов, модальную
+страницу, Popup, список, GraphicsView, согласие и локальную ленту касаний.
+Проверки: docs/development/manual-checks.md. Перед публикацией приложения выполните
+их на целевых устройствах.

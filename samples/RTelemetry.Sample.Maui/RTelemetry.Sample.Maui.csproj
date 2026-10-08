@@ -68,8 +68,8 @@
 	</ItemGroup>
 
 	<ItemGroup>
-		<PackageReference Include="Microsoft.Maui.Controls" Version="$(MauiVersion)" />
+		<PackageReference Include="Microsoft.Maui.Controls" />
 	</ItemGroup>
 
-<ItemGroup><ProjectReference Include="../../src/RTelemetry.Maui/RTelemetry.Maui.csproj" /><PackageReference Include="CommunityToolkit.Maui" Version="15.0.1" /></ItemGroup>
+<ItemGroup><ProjectReference Include="../../src/RTelemetry.Maui/RTelemetry.Maui.csproj" /><PackageReference Include="CommunityToolkit.Maui" /></ItemGroup>
 </Project>

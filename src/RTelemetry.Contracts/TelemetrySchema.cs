@@ -55,6 +55,7 @@ public static class TelemetryEventNames
     public const string SessionStart = "session.start";
     public const string SessionEnd = "session.end";
     public const string UiClick = "ui.click";
+    public const string UiMiss = "ui.miss";
     public const string ScreenShown = "ui.screen";
 }
 

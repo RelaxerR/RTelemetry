@@ -26,3 +26,7 @@ data/
 # Secrets
 appsettings.*.local.json
 *.env
+
+# Python packaging checks
+__pycache__/
+*.py[cod]

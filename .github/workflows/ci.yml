@@ -9,6 +9,20 @@ permissions:
 jobs:
   core:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: rtelemetry_tests
+          POSTGRES_USER: rtelemetry
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U rtelemetry -d rtelemetry_tests"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      RTELEMETRY_TEST_POSTGRES: Host=127.0.0.1;Port=5432;Database=rtelemetry_tests;Username=rtelemetry
     steps:
       - uses: actions/checkout@v4
         with:

@@ -1,0 +1,1 @@
+<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><Description>Platform-independent touch geometry and classification for RTelemetry.</Description></PropertyGroup></Project>

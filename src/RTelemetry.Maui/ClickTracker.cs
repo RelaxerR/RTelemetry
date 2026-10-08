@@ -1,151 +1,222 @@
-using System.Runtime.CompilerServices;
+using Stopwatch = System.Diagnostics.Stopwatch;
 using Microsoft.Maui.Controls;
 using RTelemetry.Client;
-using RTelemetry.Contracts;
+using RTelemetry.Input;
 
 namespace RTelemetry.Maui;
 
-/// <summary>
-/// Автоматически пишет <c>ui.click</c> на каждое нажатие <see cref="Button"/>, <see cref="ImageButton"/>
-/// и <see cref="TapGestureRecognizer"/> во всём дереве приложения, включая страницы, добавленные позже.
-/// </summary>
-/// <remarks>
-/// Свойства события: <c>element</c> (AutomationId → x:Name → тип), <c>element_type</c>, <c>page</c>,
-/// <c>kind</c> (<c>button</c>/<c>tap</c>), для тапа — <c>x</c>/<c>y</c> в долях страницы.
-/// Текст элементов никогда не пишется: на кнопках выбора он совпадает с текстом истории.
-/// Свои контролы (например, на GraphicsView) сообщают о нажатии через <see cref="TrackClick"/>.
-/// </remarks>
-public sealed class ClickTracker
+/// <summary>Opt-in marker for custom interactive surfaces. No text is inspected.</summary>
+public static class RTelemetry
 {
-    private static readonly object Marker = new();
+    public static readonly BindableProperty IsInteractiveProperty = BindableProperty.CreateAttached("IsInteractive", typeof(bool), typeof(RTelemetry), false);
+    public static bool GetIsInteractive(BindableObject element) => (bool)element.GetValue(IsInteractiveProperty);
+    public static void SetIsInteractive(BindableObject element, bool value) => element.SetValue(IsInteractiveProperty, value);
+}
 
-    private readonly ITelemetryClient _client;
-    private readonly ConditionalWeakTable<Element, object> _hooked = new();
-
-    public ClickTracker(ITelemetryClient client)
+public sealed class ClickTracker(ITelemetryClient client, InputOptions options)
+{
+    private readonly TouchClassifier _touch = new(options);
+    /// <summary>Raised for consented input; intended for local diagnostics such as the sample.</summary>
+    public event Action<string, IReadOnlyDictionary<string, object?>>? InputCaptured;
+    /// <summary>Compatibility method; UseRTelemetry installs platform observers automatically.</summary>
+    public void Attach(Application application) { }
+    private Snapshot? _pressed;
+    private sealed record Snapshot(Page Page, string PageId, string PageType, InputRect Bounds, IReadOnlyList<InputNode> Nodes);
+    public void Detach(Application application) => Cancel();
+    internal void Begin(long id, double x, double y, Window? window)
     {
-        _client = client;
-    }
-
-    /// <summary>Подписывается на всё дерево приложения. Вызывать один раз, например в конструкторе <c>App</c>.</summary>
-    public void Attach(Application application)
-    {
-        application.DescendantAdded += OnDescendantAdded;
-
-        foreach (var window in application.Windows)
+        try
         {
-            HookTree(window);
+            if (!_touch.Begin(id, new(x,y), Stopwatch.GetElapsedTime(0))) return;
+            _pressed = client.Consent == ConsentState.Granted && TopPage(window) is { } page ? Capture(page,x,y) : null;
         }
+        catch (Exception) { _pressed = null; }
     }
-
-    public void Detach(Application application) => application.DescendantAdded -= OnDescendantAdded;
-
-    /// <summary>Ручной клик для контролов, которые трекер не видит сам.</summary>
+    internal void Move(long id, double x, double y) => _touch.Move(id, new(x,y));
+    internal void Cancel() { _touch.Cancel(); _pressed = null; }
+    private static Page? TopPage(Window? window)
+    {
+        if (window?.Page is not { } root) return null;
+        var page = root.Navigation.ModalStack.LastOrDefault() ?? root;
+        while (page is NavigationPage navigation) page = navigation.CurrentPage;
+        if (page is Shell shell) page = shell.CurrentPage;
+        return page;
+    }
+    internal void End(long id, double x, double y, Window? window)
+    {
+        try
+        {
+            var isLong = _touch.End(id, new(x,y), Stopwatch.GetElapsedTime(0));
+            if (isLong is null)
+            {
+                if (!_touch.HasActivePointer) _pressed = null;
+                return;
+            }
+            var pressed = _pressed;
+            _pressed = null;
+            if (client.Consent != ConsentState.Granted) return;
+            var currentPage = TopPage(window);
+            // A bubbling release can arrive after a child navigated away. Never describe the
+            // replacement page as the target of the gesture that removed the original page.
+            var snapshot = pressed is not null && !ReferenceEquals(pressed.Page,currentPage)
+                ? pressed
+                : currentPage is null ? pressed : Capture(currentPage,x,y);
+            if (snapshot is null) return;
+            var hit = HitClassifier.Classify(snapshot.Nodes,new(x,y),snapshot.Bounds);
+            var props = new Dictionary<string,object?>
+            {
+                ["element"] = hit.Target?.Id ?? snapshot.PageId, ["element_type"] = hit.Target?.Type ?? snapshot.PageType,
+                ["page"] = snapshot.PageId, ["x"] = hit.X, ["y"] = hit.Y, ["long_press"] = isLong.Value,
+            };
+            if (!hit.Click)
+            {
+                props["nearest_element"] = hit.Nearest?.Id;
+                props["nearest_distance"] = hit.NearestDistance;
+                props["disabled_target"] = hit.DisabledTarget;
+            }
+            Emit(hit.Click ? "ui.click" : "ui.miss",props);
+        }
+        catch (Exception) { /* Observers must never interrupt native input dispatch. */ }
+    }
+    private static Snapshot Capture(Page page, double x, double y)
+    {
+            var bounds = Bounds(page);
+            // GetVisualTreeElements supplies platform candidates, while ordered traversal corrects
+            // sibling ZIndex and explicit clipping keeps offscreen scroll content out of nearest hits.
+            var candidates = ((IVisualTreeElement)page).GetVisualTreeElements(x, y).OfType<VisualElement>().ToHashSet();
+            var elements = OrderedTree(page).OfType<VisualElement>().Concat(candidates).Distinct().ToList();
+            var nodes = new List<InputNode>();
+            foreach (var element in elements)
+            {
+                var parent = elements.IndexOf(element.Parent as VisualElement ?? page);
+                var clipped = Clip(Bounds(element), bounds);
+                for (var ancestor = element.Parent as VisualElement; ancestor is not null; ancestor = ancestor.Parent as VisualElement)
+                    if (ancestor is ScrollView or CollectionView || ancestor is Layout { IsClippedToBounds: true })
+                        clipped = Clip(clipped, Bounds(ancestor));
+                nodes.Add(new(Describe(element),element.GetType().Name,clipped,Interactive(element,x,y),element.IsEnabled,element.IsVisible,
+                    parent >= nodes.Count ? -1 : parent));
+            }
+        return new(page,Describe(page),page.GetType().Name,bounds,Array.AsReadOnly(nodes.ToArray()));
+    }
     public void TrackClick(Element element, string kind = "custom", IReadOnlyDictionary<string, object?>? extra = null)
     {
-        var props = new Dictionary<string, object?>
+        try
         {
-            ["element"] = Describe(element),
-            ["element_type"] = element.GetType().Name,
-            ["page"] = FindPage(element)?.GetType().Name,
-            ["kind"] = kind,
+        var props = new Dictionary<string,object?> { ["element"] = Describe(element), ["element_type"] = element.GetType().Name, ["kind"] = kind, ["long_press"] = false };
+        Element? parent = element;
+        while (parent is not null and not Page) parent = parent.Parent;
+        props["page"] = parent is null ? null : Describe(parent);
+        if (extra is not null) foreach (var pair in extra) props[pair.Key] = pair.Value;
+        Emit("ui.click",props);
+            }
+        catch (Exception) { }
+    }
+
+    private void Emit(string name, Dictionary<string,object?> props)
+    {
+        if (client.Consent != ConsentState.Granted) return;
+        client.Track(name,props);
+        try { InputCaptured?.Invoke(name,props); } catch (Exception) { }
+    }
+    #pragma warning disable CS0618 // ListView remains supported for existing applications.
+    private static bool Interactive(VisualElement element, double x, double y)
+    {
+        var kind = element switch
+        {
+            Button => InputElementKind.Button,
+            ImageButton => InputElementKind.ImageButton,
+            CheckBox => InputElementKind.CheckBox,
+            Switch => InputElementKind.Switch,
+            RadioButton => InputElementKind.RadioButton,
+            Slider => InputElementKind.Slider,
+            Stepper => InputElementKind.Stepper,
+            Picker => InputElementKind.Picker,
+            DatePicker => InputElementKind.DatePicker,
+            TimePicker => InputElementKind.TimePicker,
+            Entry => InputElementKind.Entry,
+            Editor => InputElementKind.Editor,
+            CollectionView => InputElementKind.CollectionView,
+            ListView => InputElementKind.ListView,
+            _ => InputElementKind.Other,
         };
-
-        if (extra is not null)
+        var selectionEnabled = element is CollectionView { SelectionMode: not SelectionMode.None } or ListView { SelectionMode: not ListViewSelectionMode.None };
+        return InteractionRules.IsInteractive(kind,
+            element is View view && view.GestureRecognizers.OfType<TapGestureRecognizer>().Any(),
+            RTelemetry.GetIsInteractive(element), selectionEnabled,
+            selectionEnabled && IsSelectionHit(element,x,y));
+    }
+    private static bool IsSelectionHit(VisualElement element, double x, double y)
+    {
+        if (element is not CollectionView { SelectionMode: not SelectionMode.None } && element is not ListView { SelectionMode: not ListViewSelectionMode.None }) return false;
+#if IOS || MACCATALYST
+        if (element.Handler?.PlatformView is UIKit.UIView view && view.Window is { } window)
         {
-            foreach (var (key, value) in extra)
+            foreach (var candidate in NativeChildren(view))
             {
-                props[key] = value;
+                var point = candidate.ConvertPointFromView(new CoreGraphics.CGPoint(x,y),window);
+                if (candidate is UIKit.UICollectionView collection && collection.IndexPathForItemAtPoint(point) is not null) return true;
+                if (candidate is UIKit.UITableView list && list.IndexPathForRowAtPoint(point) is not null) return true;
             }
         }
-
-        _client.Track(TelemetryEventNames.UiClick, props);
+#elif ANDROID
+        if (element.Handler?.PlatformView is Android.Views.View view)
+        {
+            var position=new int[2];view.GetLocationOnScreen(position);
+            var density=view.Context?.Resources?.DisplayMetrics?.Density ?? 1;
+            var px=(float)(x*density-position[0]);var py=(float)(y*density-position[1]);
+            if (view is AndroidX.RecyclerView.Widget.RecyclerView collection) return collection.FindChildViewUnder(px,py) is not null;
+            if (view is Android.Widget.ListView list) return list.PointToPosition((int)px,(int)py) != Android.Widget.AdapterView.InvalidPosition;
+        }
+#elif WINDOWS
+        if (element.Handler?.PlatformView is Microsoft.UI.Xaml.Controls.ListViewBase list)
+            return Microsoft.UI.Xaml.Media.VisualTreeHelper.FindElementsInHostCoordinates(new Windows.Foundation.Point(x,y),list).Any(v => v is Microsoft.UI.Xaml.Controls.ListViewItem or Microsoft.UI.Xaml.Controls.GridViewItem);
+#endif
+        return false;
     }
-
-    private void OnDescendantAdded(object? sender, ElementEventArgs e) => HookTree(e.Element);
-
-    private void HookTree(Element root)
+#if IOS || MACCATALYST
+    private static IEnumerable<UIKit.UIView> NativeChildren(UIKit.UIView view)
     {
-        Hook(root);
-        if (root is IVisualTreeElement visual)
-        {
-            foreach (var child in visual.GetVisualTreeDescendants())
-            {
-                if (child is Element element)
-                {
-                    Hook(element);
-                }
-            }
-        }
+        yield return view;
+        foreach(var child in view.Subviews)
+            foreach(var descendant in NativeChildren(child)) yield return descendant;
     }
-
-    private void Hook(Element element)
+#endif
+    private static string Describe(Element e) => !string.IsNullOrEmpty(e.AutomationId) ? e.AutomationId : !string.IsNullOrEmpty(e.StyleId) ? e.StyleId : e.GetType().Name;
+    private static IEnumerable<IVisualTreeElement> OrderedTree(IVisualTreeElement root)
     {
-        if (_hooked.TryGetValue(element, out _))
-        {
-            return;
-        }
-
-        _hooked.Add(element, Marker);
-
-        switch (element)
-        {
-            case Button button:
-                button.Clicked += OnButtonClicked;
-                break;
-            case ImageButton imageButton:
-                imageButton.Clicked += OnButtonClicked;
-                break;
-        }
-
-        if (element is View view)
-        {
-            foreach (var tap in view.GestureRecognizers.OfType<TapGestureRecognizer>())
-            {
-                tap.Tapped += (_, args) => OnTapped(view, args);
-            }
-        }
+        yield return root;
+        foreach (var child in root.GetVisualChildren().OrderBy(c => (c as VisualElement)?.ZIndex ?? 0))
+            foreach (var descendant in OrderedTree(child)) yield return descendant;
     }
-
-    private void OnButtonClicked(object? sender, EventArgs e)
+    private static InputRect Clip(InputRect rectangle, InputRect clip)
     {
-        if (sender is Element element)
-        {
-            TrackClick(element, "button");
-        }
+        var x=Math.Max(rectangle.X,clip.X);var y=Math.Max(rectangle.Y,clip.Y);
+        return new(x,y,Math.Max(0,Math.Min(rectangle.X+rectangle.Width,clip.X+clip.Width)-x),Math.Max(0,Math.Min(rectangle.Y+rectangle.Height,clip.Y+clip.Height)-y));
     }
-
-    private void OnTapped(View view, TappedEventArgs args)
+    private static InputRect Bounds(VisualElement e)
     {
-        var page = FindPage(view);
-        Dictionary<string, object?>? extra = null;
-
-        if (page is not null && page.Width > 0 && page.Height > 0 && args.GetPosition(page) is { } point)
+#if ANDROID
+        if (e.Handler?.PlatformView is Android.Views.View view)
         {
-            extra = new Dictionary<string, object?>
-            {
-                ["x"] = Math.Round(point.X / page.Width, 4),
-                ["y"] = Math.Round(point.Y / page.Height, 4),
-            };
+            var position = new int[2]; view.GetLocationOnScreen(position);
+            var density = view.Context?.Resources?.DisplayMetrics?.Density ?? 1;
+            return new(position[0]/density,position[1]/density,view.Width/density,view.Height/density);
         }
-
-        TrackClick(view, "tap", extra);
-    }
-
-    private static string Describe(Element element)
-    {
-        if (!string.IsNullOrEmpty(element.AutomationId)) return element.AutomationId;
-        if (!string.IsNullOrEmpty(element.StyleId)) return element.StyleId;
-        return element.GetType().Name;
-    }
-
-    private static Page? FindPage(Element? element)
-    {
-        while (element is not null and not Page)
+#elif IOS || MACCATALYST
+        if (e.Handler?.PlatformView is UIKit.UIView view && view.Window is { } window)
         {
-            element = element.Parent;
+            var rect = view.ConvertRectToView(view.Bounds,window);
+            return new(rect.X,rect.Y,rect.Width,rect.Height);
         }
-
-        return element as Page;
+#elif WINDOWS
+        if(e.Handler?.PlatformView is Microsoft.UI.Xaml.FrameworkElement view)
+        {
+            var p = view.TransformToVisual(null).TransformPoint(new Windows.Foundation.Point());
+            return new(p.X,p.Y,view.ActualWidth,view.ActualHeight);
+        }
+#endif
+        var x=e.X;var y=e.Y;
+        for (var parent=e.Parent as VisualElement;parent is not null;parent=parent.Parent as VisualElement) { x+=parent.X;y+=parent.Y; }
+        return new(x,y,e.Width,e.Height);
     }
 }

@@ -4,6 +4,7 @@ using Microsoft.Maui.Devices;
 using Microsoft.Maui.Hosting;
 using Microsoft.Maui.Storage;
 using RTelemetry.Client;
+using RTelemetry.Input;
 
 namespace RTelemetry.Maui;
 
@@ -12,9 +13,9 @@ public static class MauiAppBuilderExtensions
     /// <summary>
     /// Регистрирует <see cref="ITelemetryClient"/> и <see cref="ClickTracker"/> как синглтоны.
     /// Папка хранения, версия приложения и платформа заполняются из MAUI, если не заданы.
-    /// Клики начинают собираться после <c>ClickTracker.Attach(app)</c>, события уходят только после согласия.
+    /// Платформенные наблюдатели ввода и жизненного цикла подключаются автоматически. События уходят только после согласия.
     /// </summary>
-    public static MauiAppBuilder UseRTelemetry(this MauiAppBuilder builder, Action<TelemetryClientOptions> configure)
+    public static MauiAppBuilder UseRTelemetry(this MauiAppBuilder builder, Action<TelemetryClientOptions> configure, Action<InputOptions>? configureInput = null)
     {
         builder.Services.AddSingleton<TelemetryClient>(_ =>
         {
@@ -28,7 +29,12 @@ public static class MauiAppBuilderExtensions
             return TelemetryClient.Create(options).Start();
         });
         builder.Services.AddSingleton<ITelemetryClient>(sp => sp.GetRequiredService<TelemetryClient>());
+        var inputOptions = new InputOptions();
+        configureInput?.Invoke(inputOptions);
+        inputOptions.Validate();
+        builder.Services.AddSingleton(inputOptions);
         builder.Services.AddSingleton<ClickTracker>();
+        PlatformInput.Configure(builder);
         return builder;
     }
 }

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
 using RTelemetry.Client.Storage;
 using RTelemetry.Client.Transport;
 using RTelemetry.Contracts;
@@ -29,6 +30,14 @@ public sealed class TelemetryClient : ITelemetryClient, IAsyncDisposable, IDispo
     private string? _contentVersion;
     private Task? _loop;
     private bool _disposed;
+    private Task? _disposeTask;
+    private HttpClient? _ownedHttp;
+    private CancellationTokenSource _consentLifetime = new();
+    private DateTimeOffset? _backgroundAt;
+    private bool _foreground;
+    private bool _sessionActive;
+    private int _retryAttempt;
+    private DateTimeOffset _retryAfter;
 
     public TelemetryClient(
         TelemetryClientOptions options,
@@ -48,7 +57,12 @@ public sealed class TelemetryClient : ITelemetryClient, IAsyncDisposable, IDispo
 
         if (_state.Consent == ConsentState.Granted)
         {
-            _queue.AddRange(SafeLoadQueue());
+            _queue.AddRange(SafeLoadQueue().TakeLast(options.MaxQueuedEvents));
+        }
+
+        else
+        {
+            Safe(_storage.ClearQueue);
         }
 
         _sessionId = Guid.NewGuid();
@@ -61,8 +75,11 @@ public sealed class TelemetryClient : ITelemetryClient, IAsyncDisposable, IDispo
         options.Validate();
         var http = httpClient ?? new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
         var transport = new HttpTelemetryTransport(http, options.Endpoint!, options.ApiKey);
-        var storage = new FileTelemetryStorage(options.StorageDirectory);
-        return new TelemetryClient(options, transport, storage);
+        var storage = new FileTelemetryStorage(options.StorageDirectory, options.MaxQueueBytes);
+        return new TelemetryClient(options, transport, storage)
+        {
+            _ownedHttp = httpClient is null ? http : null,
+        };
     }
 
     public ConsentState Consent
@@ -85,7 +102,7 @@ public sealed class TelemetryClient : ITelemetryClient, IAsyncDisposable, IDispo
     {
         lock (_gate)
         {
-            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (_disposed) return this;
             _loop ??= Task.Run(() => RunLoopAsync(_lifetime.Token));
         }
 
@@ -96,31 +113,67 @@ public sealed class TelemetryClient : ITelemetryClient, IAsyncDisposable, IDispo
     {
         lock (_gate)
         {
+            if (_disposed || !Enum.IsDefined(consent)) return;
+            var previous = _state.Consent;
             _state = _state with { Consent = consent };
             if (consent != ConsentState.Granted)
             {
                 _queue.Clear();
+                Safe(_consentLifetime.Cancel);
+                _consentLifetime.Dispose();
+                _consentLifetime = new();
+                _sessionActive = false;
+                _retryAttempt = 0;
+                _retryAfter = default;
+                Safe(_storage.ClearQueue);
             }
+            SafeSaveState(_state);
+            if (consent == ConsentState.Granted && previous != consent && _foreground)
+                StartSession();
         }
-
-        if (consent != ConsentState.Granted)
-        {
-            Safe(_storage.ClearQueue);
-        }
-
-        SafeSaveState(_state);
     }
 
     public void ResetInstallId()
     {
         lock (_gate)
         {
+            if (_disposed) return;
+            Safe(_consentLifetime.Cancel);
+            _consentLifetime.Dispose();
+            _consentLifetime = new();
             _state = _state with { InstallId = Guid.NewGuid() };
             _queue.Clear();
+            Safe(_storage.ClearQueue);
+            SafeSaveState(_state);
+            _sessionActive = false;
+            _retryAfter = default;
+            _retryAttempt = 0;
+            if (_foreground) StartSession();
         }
+    }
 
-        Safe(_storage.ClearQueue);
-        SafeSaveState(_state);
+    public void OnForeground()
+    {
+        lock (_gate)
+        {
+            if (_disposed || _foreground) return;
+            _foreground = true;
+            if (!_sessionActive || (_backgroundAt is { } at && _time.GetUtcNow() - at >= _options.SessionTimeout))
+                StartSession();
+            _backgroundAt = null;
+        }
+    }
+
+    public Task OnBackgroundAsync(CancellationToken cancellationToken = default)
+    {
+        lock (_gate)
+        {
+            if (_disposed || !_foreground) return Task.CompletedTask;
+            _foreground = false;
+            _backgroundAt = _time.GetUtcNow();
+            if (_sessionActive) EndSession();
+        }
+        return FlushAsync(cancellationToken);
     }
 
     public void SetContentVersion(string? contentVersion)
@@ -132,24 +185,28 @@ public sealed class TelemetryClient : ITelemetryClient, IAsyncDisposable, IDispo
     {
         lock (_gate)
         {
+            if (_disposed || _state.Consent != ConsentState.Granted) return;
+            _sessionActive = true;
             _sessionId = Guid.NewGuid();
             _sessionStartedAt = _time.GetUtcNow();
             _sequence = 0;
+            Track(TelemetryEventNames.SessionStart, props);
         }
-
-        Track(TelemetryEventNames.SessionStart, props);
     }
 
     public void EndSession(IReadOnlyDictionary<string, object?>? props = null)
     {
-        DateTimeOffset startedAt;
-        lock (_gate) startedAt = _sessionStartedAt;
-
-        var merged = new Dictionary<string, object?>(props ?? new Dictionary<string, object?>())
+        try
         {
-            ["duration_ms"] = (long)(_time.GetUtcNow() - startedAt).TotalMilliseconds,
-        };
-        Track(TelemetryEventNames.SessionEnd, merged);
+            var merged = new Dictionary<string, object?>(props ?? new Dictionary<string, object?>());
+            lock (_gate)
+            {
+                if (_disposed || _state.Consent != ConsentState.Granted) return;
+                merged["duration_ms"] = Math.Max(0, (long)(_time.GetUtcNow() - _sessionStartedAt).TotalMilliseconds);
+                Track(TelemetryEventNames.SessionEnd, merged);
+            }
+        }
+        catch (Exception ex) { Diagnostic($"Invalid session properties: {ex.GetType().Name}."); }
     }
 
     public void Track(string name, IReadOnlyDictionary<string, object?>? props = null)
@@ -165,7 +222,9 @@ public sealed class TelemetryClient : ITelemetryClient, IAsyncDisposable, IDispo
             return;
         }
 
-        var converted = ConvertProps(name, props);
+        Dictionary<string, JsonElement>? converted;
+        try { converted = ConvertProps(name, props); }
+        catch (Exception ex) { Diagnostic($"Invalid properties: {ex.GetType().Name}."); return; }
         var flushNow = false;
 
         lock (_gate)
@@ -219,9 +278,11 @@ public sealed class TelemetryClient : ITelemetryClient, IAsyncDisposable, IDispo
             while (!cancellationToken.IsCancellationRequested)
             {
                 TelemetryBatch batch;
+                Task<SendResult> sending;
+                CancellationTokenSource requestLifetime;
                 lock (_gate)
                 {
-                    if (_queue.Count == 0 || _state.Consent != ConsentState.Granted)
+                    if (_disposed || _queue.Count == 0 || _state.Consent != ConsentState.Granted || _time.GetUtcNow() < _retryAfter)
                     {
                         break;
                     }
@@ -233,12 +294,15 @@ public sealed class TelemetryClient : ITelemetryClient, IAsyncDisposable, IDispo
                         Platform = _options.Platform,
                         Events = _queue.Take(_options.MaxBatchSize).ToList(),
                     };
+                    requestLifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _consentLifetime.Token, _lifetime.Token);
+                    try { sending = _transport.SendAsync(batch, requestLifetime.Token); }
+                    catch (Exception ex) { sending = Task.FromException<SendResult>(ex); }
                 }
 
                 SendResult result;
                 try
                 {
-                    result = await _transport.SendAsync(batch, cancellationToken).ConfigureAwait(false);
+                    result = await sending.ConfigureAwait(false);
                 }
                 catch (OperationCanceledException)
                 {
@@ -250,10 +314,22 @@ public sealed class TelemetryClient : ITelemetryClient, IAsyncDisposable, IDispo
                     result = SendResult.RetryLater;
                 }
 
+                finally { requestLifetime.Dispose(); }
+
                 if (result == SendResult.RetryLater)
                 {
+                    lock (_gate)
+                    {
+                        if (_state.InstallId == batch.InstallId && _queue.Any(e => e.Id == batch.Events[0].Id))
+                        {
+                            var cap = Math.Min(_options.RetryMaxDelay.TotalMilliseconds,
+                                _options.RetryInitialDelay.TotalMilliseconds * Math.Pow(2, Math.Min(_retryAttempt++, 30)));
+                            _retryAfter = _time.GetUtcNow().AddMilliseconds(cap * (0.5 + Random.Shared.NextDouble() * 0.5));
+                        }
+                    }
                     break;
                 }
+                lock (_gate) { _retryAttempt = 0; _retryAfter = default; }
 
                 if (result == SendResult.Rejected)
                 {
@@ -273,21 +349,20 @@ public sealed class TelemetryClient : ITelemetryClient, IAsyncDisposable, IDispo
         }
     }
 
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync()
     {
-        Task? loop;
         lock (_gate)
         {
-            if (_disposed)
-            {
-                return;
-            }
-
+            if (_disposeTask is not null) return new ValueTask(_disposeTask);
             _disposed = true;
-            loop = _loop;
+            _disposeTask = DisposeCoreAsync(_loop);
+            return new ValueTask(_disposeTask);
         }
+    }
 
-        _lifetime.Cancel();
+    private async Task DisposeCoreAsync(Task? loop)
+    {
+        Safe(_lifetime.Cancel);
         if (loop is not null)
         {
             try
@@ -299,7 +374,11 @@ public sealed class TelemetryClient : ITelemetryClient, IAsyncDisposable, IDispo
             }
         }
 
-        PersistQueue();
+        await _flushLock.WaitAsync().ConfigureAwait(false);
+        try { PersistQueue(); }
+        finally { _flushLock.Release(); }
+        Safe(() => _ownedHttp?.Dispose());
+        _consentLifetime.Dispose();
         _lifetime.Dispose();
     }
 
@@ -376,18 +455,11 @@ public sealed class TelemetryClient : ITelemetryClient, IAsyncDisposable, IDispo
 
     private void PersistQueue()
     {
-        List<TelemetryEvent> snapshot;
         lock (_gate)
         {
-            if (_state.Consent != ConsentState.Granted)
-            {
-                return;
-            }
-
-            snapshot = [.. _queue];
+            if (_state.Consent != ConsentState.Granted) return;
+            Safe(() => _storage.SaveQueue([.. _queue]));
         }
-
-        Safe(() => _storage.SaveQueue(snapshot));
     }
 
     private ClientState? SafeLoadState()
@@ -432,6 +504,7 @@ public sealed class TelemetryClient : ITelemetryClient, IAsyncDisposable, IDispo
 
     private void Diagnostic(string message)
     {
+        try { _options.Logger?.LogWarning("{TelemetryDiagnostic}", message); } catch { }
         try
         {
             _options.OnDiagnostic?.Invoke(message);

@@ -1,0 +1,118 @@
+name: build-test-pack
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  core:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: rtelemetry_tests
+          POSTGRES_USER: rtelemetry
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U rtelemetry -d rtelemetry_tests"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      RTELEMETRY_TEST_POSTGRES: Host=127.0.0.1;Port=5432;Database=rtelemetry_tests;Username=rtelemetry
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - run: python3 -m unittest discover -s eng/tests -v
+      - run: dotnet build src/RTelemetry.Server -c Release -warnaserror
+      - run: |
+          for project in tests/*/*.csproj; do
+            dotnet test "$project" -c Release -warnaserror --logger trx
+          done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results
+          path: tests/**/TestResults/*.trx
+  maui:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - run: dotnet workload install maui
+      - run: dotnet build src/RTelemetry.Maui -c Release -warnaserror
+      - run: dotnet build samples/RTelemetry.Sample.Maui -c Debug -f net10.0-maccatalyst -p:EnableCodeSigning=false -warnaserror
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - run: dotnet workload install maui-windows
+      - run: dotnet build src/RTelemetry.Maui -c Release -p:RTelemetryMauiTargetFrameworks=net10.0-windows10.0.19041.0 -warnaserror
+      - run: dotnet pack src/RTelemetry.Maui -c Release -p:RTelemetryMauiTargetFrameworks=net10.0-windows10.0.19041.0 -o artifacts/windows
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-nuget
+          path: artifacts/windows/*nupkg
+  pack:
+    needs: [core, maui, windows]
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - run: dotnet workload install maui
+      - name: Check release tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          version=$(dotnet msbuild src/RTelemetry.Contracts -getProperty:Version)
+          test "$RELEASE_TAG" = "v$version"
+      - name: Pack libraries
+        run: |
+          for project in Contracts Client Input Maui; do
+            dotnet pack "src/RTelemetry.$project" -c Release -o artifacts/packages
+          done
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-nuget
+          path: artifacts/windows
+      - run: python3 eng/merge-maui-packages.py artifacts/packages artifacts/windows
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nuget-packages
+          path: artifacts/packages/*nupkg
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: pack
+    runs-on: ubuntu-latest
+    environment: nuget
+    steps:
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/download-artifact@v4
+        with:
+          name: nuget-packages
+          path: packages
+      - name: Publish to nuget.org
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: dotnet nuget push 'packages/*.nupkg' --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate

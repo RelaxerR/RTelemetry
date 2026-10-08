@@ -1,57 +1,71 @@
 # RTelemetry
 
-Собственная телеметрия RelaxerR Games: клиентская библиотека для C#-приложений и сервер с
-простым фронтом статистики. Первый потребитель — визуальная новелла The Book Game (данные для
-магистерской ВКР), но ни клиент, ни сервер не знают об играх: событие — это имя, время и плоский
-набор свойств.
+Consent-first telemetry for .NET 10 applications, with optional .NET MAUI input
+capture and a self-hosted ASP.NET Core analytics server. Domain-neutral events:
+a name, versioned envelope and flat properties. No UI text is read by the tracker.
 
-## Что внутри
+**Release candidate: 1.0.0-rc.1.** Packages are prepared locally; publishing is a
+separate owner action. See [verification and limitations](docs/development/release-1.0.md)
+and the [device checklist](docs/development/manual-checks.md).
 
-| Проект | Что делает | Пакет |
-|---|---|---|
-| `src/RTelemetry.Contracts` | Формат событий и пачек, ограничения схемы, имена стандартных событий | NuGet |
-| `src/RTelemetry.Client` | Согласие, очередь на диске, батчинг, ретраи, HTTP-доставка. Без UI-зависимостей | NuGet |
-| `src/RTelemetry.Maui` | Регистрация в MAUI, данные платформы, автосбор каждого клика (`ClickTracker`) | NuGet |
-| `src/RTelemetry.Server` | ASP.NET Core: `POST /v1/batches`, фронт статистики на Razor Pages | Деплой на свой сервер |
-| `tests/RTelemetry.Client.Tests` | xUnit: согласие, батчи, ретраи, валидация | — |
+| Component | Purpose |
+|---|---|
+| RTelemetry.Contracts | Wire schema and event names |
+| RTelemetry.Client | Consent, bounded offline queue, sessions, HTTP retries |
+| RTelemetry.Input | UI-independent hit testing and gesture classification |
+| RTelemetry.Maui | Platform touch observers, click/miss events and lifecycle |
+| RTelemetry.Server | JSON Lines or PostgreSQL, Razor dashboard, heatmaps and CSV |
+| samples/RTelemetry.Sample.Maui | Controls, modal page, Toolkit Popup and event stream |
 
-## Принципы
+## Quick start
 
-- **Без согласия ничего не пишется.** Пока игрок не дал согласие, события не попадают даже в
-  локальную очередь. Отзыв согласия стирает неотправленное.
-- **Без текста и персональных данных.** Только идентификаторы (сцен, элементов, вариантов),
-  числа и флаги. Строковое свойство обрезается до 256 символов, тексты кнопок трекер не читает.
-- **Каждый клик + семантика.** `ui.click` пишется автоматически на любое нажатие; поверх него
-  приложение шлёт смысловые события (`scene.shown`, `choice.made`), без которых клики не
-  интерпретировать.
-- **Не роняет хост.** Ошибки сети и диска уходят в `OnDiagnostic`, исключения в приложение не летят.
-- **Версии в каждом событии.** `appVersion` и `contentVersion` пишутся в каждое событие, а не
-  в сессию.
-
-## Быстрый старт
-
-```bash
-# Сервер локально (Development: проект dev / ключ dev-key, фронт dev:dev)
-dotnet run --project src/RTelemetry.Server
-# фронт: http://localhost:5180/
-
-# Тесты клиента (без MAUI workload)
+```sh
+# .NET 10 SDK; core tests do not need MAUI workloads.
 dotnet test tests/RTelemetry.Client.Tests
+dotnet test tests/RTelemetry.Input.Tests
+dotnet test tests/RTelemetry.Server.Tests
+dotnet run --project src/RTelemetry.Server
 ```
 
-Подключение в MAUI-приложение — [docs/integration.md](docs/integration.md).
+Open http://localhost:5180/ (Development only: Basic `dev:dev`, project `dev`,
+ingest key `dev-key`). Use HTTPS and private server credentials in production.
+[Integration guide](docs/integration.md) covers local packages, application setup
+and explicit consent. [Server guide](docs/server.md) covers Docker and deployment.
+
+No events are queued or sent without Granted consent. Revocation clears pending
+data and cancels delivery; it cannot undo a request already accepted by the server.
+Use the separate authenticated admin endpoint to remove stored installation data.
+
+Licensed under [MIT](LICENSE). [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md).
+
+## По-русски
+
+RTelemetry — телеметрия RelaxerR Games для C#/.NET 10 и MAUI с собственным сервером.
+Первый потребитель — The Book Game; клиент и сервер не знают об играх.
+
+- Без Granted события не попадают в память или на диск. Отзыв стирает очередь.
+- Автоматически собираются касания интерактивных элементов (`ui.click`) и промахи
+  (`ui.miss`). Перетаскивание отбрасывается, долгое нажатие помечается.
+- Текст контролов, Placeholder и введённое содержимое трекер не читает.
+- В каждом событии — версии приложения и контента. installId — случайный GUID.
+- Смысловые события добавляет приложение: клики сами по себе не объясняют контекст.
+- Ошибки клиента уходят в OnDiagnostic/ILogger, не должны ронять приложение.
+
+Ветка готовит кандидат 1.0.0-rc.1. Фактически выполненные проверки и ограничения
+смотрите в отчёте; наличие платформенного обработчика не заменяет проверку на устройстве.
 
 ## Документация
 
-| Документ | О чём |
+| Документ | Содержание |
 |---|---|
-| [docs/architecture.md](docs/architecture.md) | Устройство клиента и сервера, поток данных, решения |
-| [docs/events.md](docs/events.md) | Конверт события, стандартные события, профиль The Book Game |
-| [docs/privacy.md](docs/privacy.md) | Согласие, несовершеннолетние, что не собираем (открытые вопросы ВКР) |
-| [docs/integration.md](docs/integration.md) | Подключение к приложению: пакет или локальный проект, MAUI |
-| [docs/server.md](docs/server.md) | Настройка, API, деплой, план перехода на PostgreSQL |
-| [docs/AI_MEMORY.md](docs/AI_MEMORY.md) | Правила и решения для ИИ-ассистентов |
-
-## Статус
-
-0.1.0 — каркас. Сборка и тесты ещё не прогонялись на машине автора (см. `docs/AI_MEMORY.md`).
+| [Архитектура](docs/architecture.md) | Поток данных, очереди, ввод и сервер |
+| [События](docs/events.md) | Схема, точные определения click/miss, профиль TBG |
+| [Приватность](docs/privacy.md) | Согласие и открытые вопросы исследования |
+| [Подключение](docs/integration.md) | Быстрый старт и API приложения |
+| [Сервер](docs/server.md) | Конфигурация, API, PostgreSQL, Docker, systemd/nginx |
+| [Память проекта](docs/AI_MEMORY.md) | Обязательные инварианты и решения |
+| [План 1.0](docs/development/plan-1.0.md) | Потоки и порядок интеграции |
+| [Исходная проверка](docs/development/baseline.md) | Сборка начального каркаса |
+| [Ручные проверки](docs/development/manual-checks.md) | Устройства и поведение UI |
+| [Отчёт о выпуске](docs/development/release-1.0.md) | Проверки, ограничения и коммиты |
+| [Изменения](CHANGELOG.md) | История версий |

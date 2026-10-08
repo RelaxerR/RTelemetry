@@ -5,8 +5,9 @@
     автоматический сбор кликов (ClickTracker). Требует workload maui.
   -->
   <PropertyGroup>
-    <TargetFrameworks Condition="'$(OS)' != 'Windows_NT'">net10.0-android;net10.0-ios;net10.0-maccatalyst</TargetFrameworks>
+    <TargetFrameworks>net10.0-android;net10.0-ios;net10.0-maccatalyst</TargetFrameworks>
     <TargetFrameworks Condition="$([MSBuild]::IsOSPlatform('windows'))">$(TargetFrameworks);net10.0-windows10.0.19041.0</TargetFrameworks>
+<TargetFrameworks Condition="'$(RTelemetryMauiTargetFrameworks)' != ''">$(RTelemetryMauiTargetFrameworks)</TargetFrameworks>
     <UseMaui>true</UseMaui>
     <SingleProject>true</SingleProject>
 
@@ -21,10 +22,11 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.Maui.Controls" Version="$(MauiVersion)" />
+    <PackageReference Include="Microsoft.Maui.Controls" />
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="../RTelemetry.Input/RTelemetry.Input.csproj" />
     <ProjectReference Include="../RTelemetry.Client/RTelemetry.Client.csproj" />
   </ItemGroup>
 

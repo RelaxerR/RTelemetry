@@ -15,6 +15,8 @@ public static class IngestEndpoint
         [FromBody] TelemetryBatch? batch,
         IOptionsSnapshot<TelemetryServerOptions> options,
         IEventStore store,
+        IngestRateLimiter limiter,
+        HttpContext context,
         TimeProvider time,
         CancellationToken cancellationToken)
     {
@@ -29,6 +31,13 @@ public static class IngestEndpoint
             return Results.Unauthorized();
         }
 
+        using var lease = limiter.Acquire(batch.Project);
+        if (!lease.IsAcquired)
+        {
+            context.Response.Headers.RetryAfter = "60";
+            return Results.StatusCode(StatusCodes.Status429TooManyRequests);
+        }
+
         var receivedAt = time.GetUtcNow();
         var stored = batch.Events.Select(e => StoredEvent.From(batch, e, receivedAt)).ToList();
         await store.AppendAsync(stored, cancellationToken);
@@ -36,7 +45,7 @@ public static class IngestEndpoint
         return Results.Ok(new { accepted = stored.Count });
     }
 
-    private static bool KeyMatches(string? provided, string expected)
+    internal static bool KeyMatches(string? provided, string expected)
     {
         if (string.IsNullOrEmpty(provided) || string.IsNullOrEmpty(expected))
         {

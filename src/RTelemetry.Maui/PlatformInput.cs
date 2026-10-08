@@ -12,6 +12,7 @@ internal static class PlatformInput
     {
         get { try { return Services?.GetService<ClickTracker>(); } catch (Exception) { return null; } }
     }
+    private static void Observe(Action action) { try { action(); } catch (Exception) { } }
     private static void Foreground() { try { Services?.GetService<TelemetryClient>()?.OnForeground(); } catch(Exception) { } }
     private static async void Background()
     {
@@ -44,19 +45,19 @@ internal static class PlatformInput
         events.AddWindows(windows => windows.OnWindowCreated(window =>
         {
             if (window.Content is not Microsoft.UI.Xaml.UIElement root) return;
-            root.AddHandler(Microsoft.UI.Xaml.UIElement.PointerPressedEvent, new Microsoft.UI.Xaml.Input.PointerEventHandler((_,e) =>
+            root.AddHandler(Microsoft.UI.Xaml.UIElement.PointerPressedEvent, new Microsoft.UI.Xaml.Input.PointerEventHandler((_,e) => Observe(() =>
             {
-                var p=e.GetCurrentPoint(null); Tracker?.Begin(p.PointerId,p.Position.X,p.Position.Y);
-            }),true);
-            root.AddHandler(Microsoft.UI.Xaml.UIElement.PointerMovedEvent, new Microsoft.UI.Xaml.Input.PointerEventHandler((_,e) =>
+                var p=e.GetCurrentPoint(null); Tracker?.Begin(p.PointerId,p.Position.X,p.Position.Y,FindWindow(window));
+            })),true);
+            root.AddHandler(Microsoft.UI.Xaml.UIElement.PointerMovedEvent, new Microsoft.UI.Xaml.Input.PointerEventHandler((_,e) => Observe(() =>
             {
                 var p=e.GetCurrentPoint(null); Tracker?.Move(p.PointerId,p.Position.X,p.Position.Y);
-            }),true);
-            root.AddHandler(Microsoft.UI.Xaml.UIElement.PointerReleasedEvent, new Microsoft.UI.Xaml.Input.PointerEventHandler((_,e) =>
+            })),true);
+            root.AddHandler(Microsoft.UI.Xaml.UIElement.PointerReleasedEvent, new Microsoft.UI.Xaml.Input.PointerEventHandler((_,e) => Observe(() =>
             {
                 var p=e.GetCurrentPoint(null); Tracker?.End(p.PointerId,p.Position.X,p.Position.Y,FindWindow(window));
-            }),true);
-            root.AddHandler(Microsoft.UI.Xaml.UIElement.PointerCanceledEvent,new Microsoft.UI.Xaml.Input.PointerEventHandler((_,_)=>Tracker?.Cancel()),true);
+            })),true);
+            root.AddHandler(Microsoft.UI.Xaml.UIElement.PointerCanceledEvent,new Microsoft.UI.Xaml.Input.PointerEventHandler((_,_)=>Observe(()=>Tracker?.Cancel())),true);
             window.Activated += (_,e) => { if(e.WindowActivationState == Microsoft.UI.Xaml.WindowActivationState.Deactivated) Background(); else Foreground(); };
             window.Closed += (_,_) => Background();
             Foreground();
@@ -78,7 +79,7 @@ internal static class PlatformInput
                     var id=e.GetPointerId(e.ActionIndex);var x=e.RawX/density;var y=e.RawY/density;
                     switch(e.ActionMasked)
                     {
-                        case Android.Views.MotionEventActions.Down: Tracker?.Begin(id,x,y);break;
+                        case Android.Views.MotionEventActions.Down: Tracker?.Begin(id,x,y,FindWindow(activity));break;
                         case Android.Views.MotionEventActions.Move: Tracker?.Move(e.GetPointerId(0),x,y);break;
                         case Android.Views.MotionEventActions.Up: Tracker?.End(id,x,y,FindWindow(activity));break;
                         case Android.Views.MotionEventActions.PointerUp: if(e.ActionIndex==0) Tracker?.End(id,x,y,FindWindow(activity));break;
@@ -103,7 +104,7 @@ internal static class PlatformInput
             if(_first is not null) return;
             _first=touches.AnyObject as UIKit.UITouch;
             if(_first is null)return;
-            var p=_first.LocationInView(View);Tracker?.Begin(0,p.X,p.Y);
+            var p=_first.LocationInView(View);Tracker?.Begin(0,p.X,p.Y,View is null ? null : FindWindow(View));
         }
         public override void TouchesMoved(Foundation.NSSet touches, UIKit.UIEvent evt)
         {

@@ -20,41 +20,49 @@ public sealed class ClickTracker(ITelemetryClient client, InputOptions options)
     public event Action<string, IReadOnlyDictionary<string, object?>>? InputCaptured;
     /// <summary>Compatibility method; UseRTelemetry installs platform observers automatically.</summary>
     public void Attach(Application application) { }
-    public void Detach(Application application) => _touch.Cancel();
-    internal void Begin(long id, double x, double y) => _touch.Begin(id, new(x,y), Stopwatch.GetElapsedTime(0));
+    private Snapshot? _pressed;
+    private sealed record Snapshot(Page Page, string PageId, string PageType, InputRect Bounds, IReadOnlyList<InputNode> Nodes);
+    public void Detach(Application application) => Cancel();
+    internal void Begin(long id, double x, double y, Window? window)
+    {
+        try
+        {
+            if (!_touch.Begin(id, new(x,y), Stopwatch.GetElapsedTime(0))) return;
+            _pressed = client.Consent == ConsentState.Granted && TopPage(window) is { } page ? Capture(page,x,y) : null;
+        }
+        catch (Exception) { _pressed = null; }
+    }
     internal void Move(long id, double x, double y) => _touch.Move(id, new(x,y));
-    internal void Cancel() => _touch.Cancel();
+    internal void Cancel() { _touch.Cancel(); _pressed = null; }
+    private static Page? TopPage(Window? window)
+    {
+        if (window?.Page is not { } root) return null;
+        var page = root.Navigation.ModalStack.LastOrDefault() ?? root;
+        while (page is NavigationPage navigation) page = navigation.CurrentPage;
+        if (page is Shell shell) page = shell.CurrentPage;
+        return page;
+    }
     internal void End(long id, double x, double y, Window? window)
     {
         try
         {
             var isLong = _touch.End(id, new(x,y), Stopwatch.GetElapsedTime(0));
-            if (isLong is null || client.Consent != ConsentState.Granted || window?.Page is not { } root) return;
-            var page = root.Navigation.ModalStack.LastOrDefault() ?? root;
-            while (page is NavigationPage navigation) page = navigation.CurrentPage;
-            if (page is Shell shell) page = shell.CurrentPage;
-            var bounds = Bounds(page);
-            // GetVisualTreeElements supplies platform candidates, while ordered traversal corrects
-            // sibling ZIndex and explicit clipping keeps offscreen scroll content out of nearest hits.
-            var candidates = ((IVisualTreeElement)page).GetVisualTreeElements(x, y).OfType<VisualElement>().ToHashSet();
-            var elements = OrderedTree(page).OfType<VisualElement>().Distinct().ToList();
-            var nodes = new List<InputNode>();
-            foreach (var element in elements)
-            {
-                var parent = elements.IndexOf(element.Parent as VisualElement ?? page);
-                var clipped = Clip(Bounds(element), bounds);
-                for (var ancestor = element.Parent as VisualElement; ancestor is not null; ancestor = ancestor.Parent as VisualElement)
-                    if (ancestor is ScrollView or CollectionView || ancestor is Layout { IsClippedToBounds: true })
-                        clipped = Clip(clipped, Bounds(ancestor));
-                nodes.Add(new(Describe(element),element.GetType().Name,clipped,Interactive(element) || IsSelectionHit(element,x,y),element.IsEnabled,element.IsVisible,
-                    parent >= nodes.Count ? -1 : parent,
-                    candidates.Contains(element) || clipped.Contains(new(x,y))));
-            }
-            var hit = HitClassifier.Classify(nodes,new(x,y),bounds);
+            if (isLong is null) return;
+            var pressed = _pressed;
+            _pressed = null;
+            if (client.Consent != ConsentState.Granted) return;
+            var currentPage = TopPage(window);
+            // A bubbling release can arrive after a child navigated away. Never describe the
+            // replacement page as the target of the gesture that removed the original page.
+            var snapshot = pressed is not null && !ReferenceEquals(pressed.Page,currentPage)
+                ? pressed
+                : currentPage is null ? pressed : Capture(currentPage,x,y);
+            if (snapshot is null) return;
+            var hit = HitClassifier.Classify(snapshot.Nodes,new(x,y),snapshot.Bounds);
             var props = new Dictionary<string,object?>
             {
-                ["element"] = hit.Target?.Id ?? Describe(page), ["element_type"] = hit.Target?.Type ?? page.GetType().Name,
-                ["page"] = Describe(page), ["x"] = hit.X, ["y"] = hit.Y, ["long_press"] = isLong.Value,
+                ["element"] = hit.Target?.Id ?? snapshot.PageId, ["element_type"] = hit.Target?.Type ?? snapshot.PageType,
+                ["page"] = snapshot.PageId, ["x"] = hit.X, ["y"] = hit.Y, ["long_press"] = isLong.Value,
             };
             if (!hit.Click)
             {
@@ -65,6 +73,26 @@ public sealed class ClickTracker(ITelemetryClient client, InputOptions options)
             Emit(hit.Click ? "ui.click" : "ui.miss",props);
         }
         catch (Exception) { /* Observers must never interrupt native input dispatch. */ }
+    }
+    private static Snapshot Capture(Page page, double x, double y)
+    {
+            var bounds = Bounds(page);
+            // GetVisualTreeElements supplies platform candidates, while ordered traversal corrects
+            // sibling ZIndex and explicit clipping keeps offscreen scroll content out of nearest hits.
+            var candidates = ((IVisualTreeElement)page).GetVisualTreeElements(x, y).OfType<VisualElement>().ToHashSet();
+            var elements = OrderedTree(page).OfType<VisualElement>().Concat(candidates).Distinct().ToList();
+            var nodes = new List<InputNode>();
+            foreach (var element in elements)
+            {
+                var parent = elements.IndexOf(element.Parent as VisualElement ?? page);
+                var clipped = Clip(Bounds(element), bounds);
+                for (var ancestor = element.Parent as VisualElement; ancestor is not null; ancestor = ancestor.Parent as VisualElement)
+                    if (ancestor is ScrollView or CollectionView || ancestor is Layout { IsClippedToBounds: true })
+                        clipped = Clip(clipped, Bounds(ancestor));
+                nodes.Add(new(Describe(element),element.GetType().Name,clipped,Interactive(element) || IsSelectionHit(element,x,y),element.IsEnabled,element.IsVisible,
+                    parent >= nodes.Count ? -1 : parent));
+            }
+        return new(page,Describe(page),page.GetType().Name,bounds,Array.AsReadOnly(nodes.ToArray()));
     }
     public void TrackClick(Element element, string kind = "custom", IReadOnlyDictionary<string, object?>? extra = null)
     {

@@ -31,6 +31,7 @@ public static class MauiAppBuilderExtensions
         builder.Services.AddSingleton<ITelemetryClient>(sp => sp.GetRequiredService<TelemetryClient>());
         var inputOptions = new InputOptions();
         configureInput?.Invoke(inputOptions);
+        inputOptions.Validate();
         builder.Services.AddSingleton(inputOptions);
         builder.Services.AddSingleton<ClickTracker>();
         PlatformInput.Configure(builder);

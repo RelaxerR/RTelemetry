@@ -4,6 +4,13 @@ public sealed class InputOptions
 {
     public double DragThreshold { get; set; } = 12;
     public TimeSpan LongPressThreshold { get; set; } = TimeSpan.FromMilliseconds(600);
+    public void Validate()
+    {
+        if (!double.IsFinite(DragThreshold) || DragThreshold < 0)
+            throw new ArgumentOutOfRangeException(nameof(DragThreshold));
+        if (LongPressThreshold <= TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(nameof(LongPressThreshold));
+    }
 }
 
 public readonly record struct InputPoint(double X, double Y);
@@ -62,6 +69,7 @@ public static class HitClassifier
 public sealed class TouchClassifier(InputOptions options)
 {
     private long? _pointer;
+    public bool HasActivePointer => _pointer is not null;
     private InputPoint _start;
     private TimeSpan _started;
     private bool _drag;

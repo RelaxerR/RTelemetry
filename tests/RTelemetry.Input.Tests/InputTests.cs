@@ -22,6 +22,7 @@ public class InputTests
     {
         var t = new TouchClassifier(new()); t.Begin(1,new(0,0),TimeSpan.Zero);t.Move(1,new(30,0));
         Assert.Null(t.End(1,new(0,0),TimeSpan.FromSeconds(1)));
+        Assert.False(t.HasActivePointer);
     }
     [Fact] public void OnlyFirstPointerProducesOneLongPress()
     {

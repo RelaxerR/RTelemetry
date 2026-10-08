@@ -65,10 +65,11 @@ public sealed class TouchClassifier(InputOptions options)
     private InputPoint _start;
     private TimeSpan _started;
     private bool _drag;
-    public void Begin(long pointer, InputPoint point, TimeSpan time)
+    public bool Begin(long pointer, InputPoint point, TimeSpan time)
     {
-        if (_pointer is not null) return;
+        if (_pointer is not null) return false;
         _pointer = pointer; _start = point; _started = time; _drag = false;
+        return true;
     }
     public void Move(long pointer, InputPoint point)
     {

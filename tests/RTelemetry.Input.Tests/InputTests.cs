@@ -53,3 +53,23 @@ public class AncestorTests
         var hit=HitClassifier.Classify(nodes,new(10,10),new(0,0,100,100));Assert.False(hit.Click);Assert.Equal("overlay",hit.Target?.Id);
     }
 }
+
+public class SnapshotTests
+{
+    [Fact] public void SecondPointerCannotReplacePressSnapshot()
+    {
+        var tracker=new TouchClassifier(new());
+        Assert.True(tracker.Begin(1,new(5,5),TimeSpan.Zero));
+        Assert.False(tracker.Begin(2,new(90,90),TimeSpan.Zero));
+        Assert.False(tracker.End(1,new(5,5),TimeSpan.FromMilliseconds(100)));
+        Assert.True(tracker.Begin(3,new(10,10),TimeSpan.FromSeconds(1)));
+    }
+    [Fact] public void ReleaseUsesFrozenGeometryAfterOriginalTreeChanges()
+    {
+        var source=new List<InputNode> { new("original","Button",new(0,0,20,20),true) };
+        var snapshot=Array.AsReadOnly(source.ToArray());
+        source.Clear();source.Add(new("replacement","Label",new(0,0,20,20),false));
+        var hit=HitClassifier.Classify(snapshot,new(10,10),new(0,0,100,100));
+        Assert.True(hit.Click);Assert.Equal("original",hit.Target?.Id);
+    }
+}

@@ -41,6 +41,9 @@ public sealed record StoredEvent
 
 public interface IEventStore
 {
+    Task<int> DeleteInstallAsync(Guid installId, CancellationToken cancellationToken);
+    Task<int> DeleteBeforeAsync(DateTimeOffset cutoff, CancellationToken cancellationToken);
+
     Task AppendAsync(IReadOnlyList<StoredEvent> events, CancellationToken cancellationToken);
 
     /// <summary>События, принятые в днях [from; to] по UTC.</summary>

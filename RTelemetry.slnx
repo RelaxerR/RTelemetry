@@ -6,6 +6,7 @@
     <Project Path="src/RTelemetry.Server/RTelemetry.Server.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/RTelemetry.Server.Tests/RTelemetry.Server.Tests.csproj" />
     <Project Path="tests/RTelemetry.Client.Tests/RTelemetry.Client.Tests.csproj" />
   </Folder>
 </Solution>

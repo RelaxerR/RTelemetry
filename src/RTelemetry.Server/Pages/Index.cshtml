@@ -21,7 +21,7 @@ table { border-collapse:collapse; width:100%; } td,th { border-bottom:1px solid 
 <label>По<input type="date" name="to" value="@Model.To?.ToString("yyyy-MM-dd")" /></label>
 <label>Версия приложения<input name="appVersion" value="@Model.AppVersion" /></label>
 <label>Версия контента<input name="contentVersion" value="@Model.ContentVersion" /></label>
-<label>Страница<select name="screen">@foreach(var screen in Model.Screens) { <option selected="@(screen == Model.Screen)" value="@screen">@screen</option> }</select></label>
+<label>Страница карты<select name="screen">@foreach(var screen in Model.Screens) { <option selected="@(screen == Model.Screen)" value="@screen">@screen</option> }</select></label>
 <button>Показать</button>
 </form>
 <p><a href="@Model.FilterUrl("Csv", Model.Session)">Экспорт CSV (текущие фильтры событий)</a> · <a href="@Model.FilterUrl()">Все сессии по фильтрам</a></p>

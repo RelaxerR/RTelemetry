@@ -1,5 +1,6 @@
 using System.Threading.RateLimiting;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Extensions.Options;
 using RTelemetry.Contracts;
 using RTelemetry.Server;
@@ -34,6 +35,11 @@ builder.Services.AddRateLimiter(o =>
             Window = TimeSpan.FromMinutes(1), QueueLimit = 0
         }));
 });
+builder.Services.Configure<ForwardedHeadersOptions>(o =>
+{
+    // Только доверенные loopback-прокси из настроек ASP.NET по умолчанию.
+    o.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+});
 builder.Services.AddRazorPages();
 var app = builder.Build();
 if (storage.Provider.Equals("Postgres", StringComparison.OrdinalIgnoreCase))
@@ -41,6 +47,7 @@ if (storage.Provider.Equals("Postgres", StringComparison.OrdinalIgnoreCase))
     await using var db = await app.Services.GetRequiredService<IDbContextFactory<TelemetryDbContext>>().CreateDbContextAsync();
     await db.Database.MigrateAsync();
 }
+app.UseForwardedHeaders();
 app.UseMiddleware<DashboardAuthMiddleware>();
 app.UseRateLimiter();
 app.Use(async (context, next) =>

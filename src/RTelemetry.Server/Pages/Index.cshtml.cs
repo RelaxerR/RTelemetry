@@ -58,7 +58,7 @@ public sealed class IndexModel(IEventStore store, TimeProvider time) : PageModel
     {
         if (!ModelState.IsValid) return BadRequest("Invalid filters");
         To ??= DateOnly.FromDateTime(time.GetUtcNow().UtcDateTime);
-        From ??= To.Value.AddDays(-6);
+        From ??= DateOnly.FromDayNumber(Math.Max(0, To.Value.DayNumber - 6));
         if (From > To || To.Value.DayNumber - From.Value.DayNumber > 365 || To == DateOnly.MaxValue)
             return BadRequest("Period must be ordered and at most 366 days");
         if (!string.IsNullOrWhiteSpace(Project) && !RTelemetry.Contracts.TelemetrySchema.IsValidName(Project))

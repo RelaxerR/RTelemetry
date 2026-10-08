@@ -60,7 +60,7 @@ public sealed class JsonLinesEventStore : IEventStore
                 if (!File.Exists(path)) continue;
 
                 // FileShare.ReadWrite: файл может дописываться приёмом прямо во время чтения.
-                using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
                 using var reader = new StreamReader(stream);
                 while (await reader.ReadLineAsync(cancellationToken) is { } line)
                 {

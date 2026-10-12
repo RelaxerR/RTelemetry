@@ -2,7 +2,8 @@
 
 Дата завершения: 2026-10-08. Исходный каркас: fc9afc0. Код интегрирован в main
 коммитом 03e4ec1 после зелёной проверки integration; сборка и тесты повторены в main.
-Публикация пакетов, push и создание релизного тега не выполнялись.
+На 2026-10-08 публикация пакетов, push и создание релизного тега не выполнялись.
+Текущее состояние после уборки 2026-10-12 описано ниже.
 
 ## Что сделано
 
@@ -113,7 +114,7 @@ JSON Lines — провайдер одного процесса разработ
 ## Коммиты по потокам
 
 План: fa2c7a5 — docs: зафиксировать план подготовки выпуска 1.0.
-Worktree сохранены в ../RTelemetry-wt/. Интеграционные merge-коммиты сохраняют историю
+Подготовительные worktree удалены 2026-10-12 после проверки полного включения в main. Интеграционные merge-коммиты сохраняют историю
 каждого потока; клиентский cherry-pick в input был технической зависимостью проверки,
 при объединении сохранён окончательный клиент release/client.
 
@@ -163,3 +164,31 @@ Worktree сохранены в ../RTelemetry-wt/. Интеграционные m
 
 Итоговые согласования зависимостей, константа UiMiss, PostgreSQL CI service и проверки
 входят в release/integration; полный граф: `git log --graph --oneline --all`.
+
+
+## Обновление состояния 2026-10-12
+
+Все семь веток release/* уже входили в main; незакоммиченных исходников в них не было.
+Worktrees удалены, пакеты и исторические TRX сохранены локально в
+`artifacts/worktree-archive-2026-10-12/` (игнорируется Git); воспроизводимые bin/obj удалены.
+Единственная рабочая ветка — main; история всех потоков сохранена merge-коммитами.
+
+Интегрированы Dependabot PR #1–9: Actions checkout 7, setup-dotnet 6,
+upload-artifact 6, download-artifact 7; Test SDK 18.10.1, xunit runner 4.0.0,
+Logging.Abstractions, Mvc.Testing и EF Design 10.0.12. Обнаруженный конфликт
+EF Core 10.0.4/10.0.12 устранён явной зависимостью сервера от Relational 10.0.12.
+
+Повторно локально: Client 24, Input 37, Server 6 passed + 1 PostgreSQL skipped,
+Python package merge 10 passed. Итого 77 passed, 1 skipped. MAUI Release
+(Android/iOS/Mac Catalyst) собран с 0 ошибок и предупреждений. PostgreSQL в этой
+проверке не запускался; исторический результат 2026-10-08 остаётся выше.
+
+Remote CI от 2026-10-08 уже проверил Windows и core, но упал на sample:
+MacCatalyst требует Xcode 27, а macos-latest выбирает 26.6. Apple jobs переведены
+на официальный preview runner `xcode-27` согласно
+[runner-images#14404](https://github.com/actions/runner-images/issues/14404).
+Это узкое исправление окружения; окончательный результат всех jobs и объединённого
+пакета ещё следует подтвердить в [#11](https://github.com/RelaxerR/RTelemetry/issues/11).
+Ручная проверка вынесена в [#10](https://github.com/RelaxerR/RTelemetry/issues/10),
+согласие и эксплуатационная готовность — в [#12](https://github.com/RelaxerR/RTelemetry/issues/12).
+NuGet-публикация, релизный тег и production deployment не выполнялись.

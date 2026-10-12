@@ -2,7 +2,7 @@
 
   <!--
     Сервер RTelemetry: приём пачек (POST /v1/batches) и простой фронт статистики (Razor Pages).
-    Хранилище пока файловое (JSON Lines по проекту и дню); PostgreSQL — следующий шаг, см. docs/server.md.
+    Хранилище PostgreSQL для production или JSON Lines для разработки, см. docs/server.md.
   -->
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
@@ -10,6 +10,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" PrivateAssets="all" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
     <ProjectReference Include="../RTelemetry.Contracts/RTelemetry.Contracts.csproj" />

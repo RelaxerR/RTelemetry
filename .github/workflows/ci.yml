@@ -42,7 +42,8 @@ jobs:
           name: test-results
           path: tests/**/TestResults/*.trx
   maui:
-    runs-on: macos-latest
+    # MacCatalyst workload requires Xcode 27; see runner-images#14404.
+    runs-on: xcode-27
     steps:
       - uses: actions/checkout@v7
         with:
@@ -69,7 +70,8 @@ jobs:
           path: artifacts/windows/*nupkg
   pack:
     needs: [core, maui, windows]
-    runs-on: macos-latest
+    # MacCatalyst workload requires Xcode 27; see runner-images#14404.
+    runs-on: xcode-27
     steps:
       - uses: actions/checkout@v7
         with:

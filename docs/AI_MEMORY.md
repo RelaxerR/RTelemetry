@@ -81,6 +81,15 @@ RTelemetry — универсальная телеметрия RelaxerR Games: N
 
 ## 6. Текущий фокус
 
+- 2026-10-12: единая ветка main; release worktrees удалены после проверки включения
+  коммитов и сохранения пакетов/TRX в artifacts/worktree-archive-2026-10-12/.
+- Обновления Dependabot #1–9 интегрированы. EF Relational явно выровнен с Design
+  на 10.0.12, чтобы тесты не получали транзитивную 10.0.4. Apple CI использует
+  xcode-27: macos-latest выбирал несовместимый Xcode 26.6.
+- Открытые задачи: [устройства](https://github.com/RelaxerR/RTelemetry/issues/10),
+  [полный CI/pack](https://github.com/RelaxerR/RTelemetry/issues/11),
+  [согласие и эксплуатация](https://github.com/RelaxerR/RTelemetry/issues/12).
+
 - Кандидат 1.0.0-rc.1 собран, автоматические проверки зелёные: результаты и ограничения
   в docs/development/release-1.0.md. Пакеты не публиковались.
 - Выполнить оставшиеся проверки устройств по docs/development/manual-checks.md.

@@ -36,7 +36,7 @@ jobs:
           for project in tests/*/*.csproj; do
             dotnet test "$project" -c Release -warnaserror --logger trx
           done
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: test-results
@@ -63,7 +63,7 @@ jobs:
       - run: dotnet workload install maui-windows
       - run: dotnet build src/RTelemetry.Maui -c Release -p:RTelemetryMauiTargetFrameworks=net10.0-windows10.0.19041.0 -warnaserror
       - run: dotnet pack src/RTelemetry.Maui -c Release -p:RTelemetryMauiTargetFrameworks=net10.0-windows10.0.19041.0 -o artifacts/windows
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: windows-nuget
           path: artifacts/windows/*nupkg
@@ -95,7 +95,7 @@ jobs:
           name: windows-nuget
           path: artifacts/windows
       - run: python3 eng/merge-maui-packages.py artifacts/packages artifacts/windows
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: nuget-packages
           path: artifacts/packages/*nupkg

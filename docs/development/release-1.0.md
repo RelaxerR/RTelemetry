@@ -20,7 +20,7 @@
 Клиент и сервер не содержат предметной области TBG. Нативные observers не подписываются
 дополнительно на managed Clicked/Tapped, чтобы не создавать дубль.
 
-## Подтверждено сборками и тестами
+## Подтверждено сборками и тестами на 2026-10-08
 
 Среда: macOS arm64, .NET SDK 10.0.301, MAUI 10.0.110, PostgreSQL 16.14.
 
@@ -48,7 +48,7 @@ PostgreSQL проверялся на отдельной временной ба�
 RTELEMETRY_TEST_POSTGRES='Host=127.0.0.1;Port=55439;Database=rtelemetry_tests;Username=rtelemetry' dotnet test RTelemetry.slnx
 ```
 
-## Завершающая проверка пакетов и безопасности
+## Завершающая проверка пакетов и безопасности на 2026-10-08
 
 В main созданы четыре nupkg и четыре snupkg в `artifacts/packages/`:
 Contracts, Client, Input и Maui, все версии 1.0.0-rc.1. Версия, MIT, README и
@@ -68,7 +68,7 @@ Sample Mac Catalyst повторно собран из окончательно�
 проверок. Git status чистый. Worktree и локальные артефакты сохранены. Push, тег
 и публикация не выполнялись; существующий origin не изменялся.
 
-## Ручная проверка и ограничения среды
+## Ручная проверка и ограничения среды на 2026-10-08
 
 Цепочка **физическое касание → sample → сервер → статистика не подтверждена**.
 Открытие sample через native UI automation зависало до прерывания. Диагностический
@@ -99,7 +99,7 @@ JSON Lines — провайдер одного процесса разработ
 Фильтр страницы карты не сужает общий CSV; карта показывает первые 5000 точек.
 Свыше 100000 событий нужно сузить фильтры — экспорт не обрезается незаметно.
 
-## Открытые вопросы перед реальным сбором и публикацией
+## Открытые вопросы перед реальным сбором и публикацией (исходный список 2026-10-08)
 
 - Выполнить ручную матрицу на целевых устройствах: Popup, модальные страницы, списки,
   изменения геометрии, мультитач, синхронная навигация и UIScene/несколько окон.
@@ -179,7 +179,8 @@ Logging.Abstractions, Mvc.Testing и EF Design 10.0.12. Обнаруженный
 EF Core 10.0.4/10.0.12 устранён явной зависимостью сервера от Relational 10.0.12.
 
 Повторно локально: Client 24, Input 37, Server 6 passed + 1 PostgreSQL skipped,
-Python package merge 10 passed. Итого 77 passed, 1 skipped. MAUI Release
+Python package merge 10 passed. Итого 77 passed, 1 skipped. Sample Mac Catalyst
+Debug с EnableCodeSigning=false также собран без ошибок и предупреждений. MAUI Release
 (Android/iOS/Mac Catalyst) собран с 0 ошибок и предупреждений. PostgreSQL в этой
 проверке не запускался; исторический результат 2026-10-08 остаётся выше.
 
@@ -192,3 +193,30 @@ MacCatalyst требует Xcode 27, а macos-latest выбирает 26.6. Appl
 Ручная проверка вынесена в [#10](https://github.com/RelaxerR/RTelemetry/issues/10),
 согласие и эксплуатационная готовность — в [#12](https://github.com/RelaxerR/RTelemetry/issues/12).
 NuGet-публикация, релизный тег и production deployment не выполнялись.
+
+
+## Проверка CI 2026-10-13
+
+В [прогоне 38243872397](https://github.com/RelaxerR/RTelemetry/actions/runs/38243872397)
+core (включая PostgreSQL), maui и windows завершились успешно. Исправление Xcode
+подтверждено на GitHub runner. Pack обнаружил отличие README между платформами:
+в Windows nupkg 71 CRLF; замена на LF даёт точное содержимое README исходного коммита.
+Добавлено `README.md text eol=lf` в `.gitattributes`; строгая проверка конфликтов
+в merge-maui-packages.py сохранена. Временный checkout с `core.autocrlf=true`
+подтвердил LF и побайтовое совпадение; 10 тестов объединения пакетов проходят.
+
+
+Повторный [CI 38352963629](https://github.com/RelaxerR/RTelemetry/actions/runs/38352963629)
+для code SHA `e687a51` завершился успешно: core (включая PostgreSQL), maui,
+windows и pack — success; publish — skipped, поскольку это push main без тега.
+Реальные артефакты скачаны в `artifacts/ci-38352963629/packages/`: четыре nupkg
+и четыре snupkg версии 1.0.0-rc.1. В RTelemetry.Maui проверены четыре lib TFM
+(Android/iOS/Mac Catalyst/Windows), четыре dependency group, Windows `.pri` в
+nupkg и четыре платформенных `.pdb` в snupkg. Задача #11 закрыта после этих проверок.
+Текущие незавершённые задачи — устройства #10 и согласие/эксплуатация #12.
+Никакие пакеты не опубликованы; production deployment не выполнялся.
+
+Все локальные и remote ветки кроме main удалены; один основной worktree,
+main отправлена в origin. Оставшиеся после IDE генерации каталоги старых worktrees
+содержали только obj и удалены 2026-10-13; исторические пакеты/TRX сохранены в архиве,
+указанном выше. План подготовки выпуска помечен как исторический.

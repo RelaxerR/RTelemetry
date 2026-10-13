@@ -87,12 +87,15 @@ RTelemetry — универсальная телеметрия RelaxerR Games: N
   на 10.0.12, чтобы тесты не получали транзитивную 10.0.4. Apple CI использует
   xcode-27: macos-latest выбирал несовместимый Xcode 26.6.
 - Открытые задачи: [устройства](https://github.com/RelaxerR/RTelemetry/issues/10),
-  [полный CI/pack](https://github.com/RelaxerR/RTelemetry/issues/11),
   [согласие и эксплуатация](https://github.com/RelaxerR/RTelemetry/issues/12).
 
 - Кандидат 1.0.0-rc.1 собран, автоматические проверки зелёные: результаты и ограничения
   в docs/development/release-1.0.md. Пакеты не публиковались.
 - Выполнить оставшиеся проверки устройств по docs/development/manual-checks.md.
 - Согласовать каталог TBG, правила согласия и несовершеннолетних (events.md/privacy.md).
-- Перед production: реальные секреты, HTTPS, доверенный proxy, бэкапы/retention;
-  прогон CI Windows и проверка общего NuGet-пакета.
+- 2026-10-13: CI 38352963629 для e687a51 зелёный (core с PostgreSQL, maui,
+  windows, pack); #11 закрыта. Реальные nupkg/snupkg проверены на четыре TFM,
+  Windows PRI и платформенные PDB; artifacts/ci-38352963629/packages/.
+  Общий README фиксируется LF через .gitattributes, иначе Windows checkout
+  создаёт CRLF и строгий merger отклоняет пакет. Публикации не было.
+- Перед production: реальные секреты, HTTPS, доверенный proxy, бэкапы/retention.

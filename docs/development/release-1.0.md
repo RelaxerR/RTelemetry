@@ -188,8 +188,9 @@ Remote CI от 2026-10-08 уже проверил Windows и core, но упал
 MacCatalyst требует Xcode 27, а macos-latest выбирает 26.6. Apple jobs переведены
 на официальный preview runner `xcode-27` согласно
 [runner-images#14404](https://github.com/actions/runner-images/issues/14404).
-Это узкое исправление окружения; окончательный результат всех jobs и объединённого
-пакета ещё следует подтвердить в [#11](https://github.com/RelaxerR/RTelemetry/issues/11).
+На 12 октября итог всех jobs и объединённого пакета ещё ожидался в
+[#11](https://github.com/RelaxerR/RTelemetry/issues/11); подтверждённый результат
+13 октября приведён ниже, задача закрыта.
 Ручная проверка вынесена в [#10](https://github.com/RelaxerR/RTelemetry/issues/10),
 согласие и эксплуатационная готовность — в [#12](https://github.com/RelaxerR/RTelemetry/issues/12).
 NuGet-публикация, релизный тег и production deployment не выполнялись.

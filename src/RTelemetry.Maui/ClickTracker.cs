@@ -27,8 +27,9 @@ public sealed class ClickTracker(ITelemetryClient client, InputOptions options)
     {
         try
         {
+            if (!client.IsCollectionEnabled || client.Consent != ConsentState.Granted) { Cancel(); return; }
             if (!_touch.Begin(id, new(x,y), Stopwatch.GetElapsedTime(0))) return;
-            _pressed = client.Consent == ConsentState.Granted && TopPage(window) is { } page ? Capture(page,x,y) : null;
+            _pressed = client.IsCollectionEnabled && client.Consent == ConsentState.Granted && TopPage(window) is { } page ? Capture(page,x,y) : null;
         }
         catch (Exception) { _pressed = null; }
     }
@@ -54,7 +55,7 @@ public sealed class ClickTracker(ITelemetryClient client, InputOptions options)
             }
             var pressed = _pressed;
             _pressed = null;
-            if (client.Consent != ConsentState.Granted) return;
+            if (!client.IsCollectionEnabled || client.Consent != ConsentState.Granted) return;
             var currentPage = TopPage(window);
             // A bubbling release can arrive after a child navigated away. Never describe the
             // replacement page as the target of the gesture that removed the original page.
@@ -102,6 +103,7 @@ public sealed class ClickTracker(ITelemetryClient client, InputOptions options)
     {
         try
         {
+        if (!client.IsCollectionEnabled || client.Consent != ConsentState.Granted) return;
         var props = new Dictionary<string,object?> { ["element"] = Describe(element), ["element_type"] = element.GetType().Name, ["kind"] = kind, ["long_press"] = false };
         Element? parent = element;
         while (parent is not null and not Page) parent = parent.Parent;
@@ -114,7 +116,7 @@ public sealed class ClickTracker(ITelemetryClient client, InputOptions options)
 
     private void Emit(string name, Dictionary<string,object?> props)
     {
-        if (client.Consent != ConsentState.Granted) return;
+        if (!client.IsCollectionEnabled || client.Consent != ConsentState.Granted) return;
         client.Track(name,props);
         try { InputCaptured?.Invoke(name,props); } catch (Exception) { }
     }

@@ -39,6 +39,12 @@ public sealed class TelemetryClientOptions
     public Action<string>? OnDiagnostic { get; set; }
 
     public TimeSpan SessionTimeout { get; set; } = TimeSpan.FromMinutes(30);
+
+    /// <summary>False запрещает сбор/отправку до явного подтверждения приложением, даже при сохранённом Granted.</summary>
+    public bool InitialCollectionEnabled { get; set; } = true;
+
+    /// <summary>При уходе в фон закрывать временное разрешение; приложение подтверждает его после возврата.</summary>
+    public bool PauseOnBackground { get; set; }
     public TimeSpan RetryInitialDelay { get; set; } = TimeSpan.FromSeconds(2);
     public TimeSpan RetryMaxDelay { get; set; } = TimeSpan.FromMinutes(5);
     public long MaxQueueBytes { get; set; } = 16 * 1024 * 1024;

@@ -10,6 +10,12 @@ public interface ITelemetryClient
 
     ConsentState Consent { get; }
 
+    /// <summary>Временное разрешение сбора и отправки; не заменяет согласие.</summary>
+    bool IsCollectionEnabled { get; }
+
+    /// <summary>Приостанавливает сбор/отправку без стирания очереди и изменения согласия.</summary>
+    void SetCollectionEnabled(bool enabled);
+
     /// <summary>Случайный идентификатор установки (не устройства и не аккаунта).</summary>
     Guid InstallId { get; }
 

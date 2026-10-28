@@ -36,6 +36,7 @@ public sealed class TelemetryClient : ITelemetryClient, IAsyncDisposable, IDispo
     private DateTimeOffset? _backgroundAt;
     private bool _foreground;
     private bool _sessionActive;
+    private bool _collectionEnabled;
     private int _retryAttempt;
     private DateTimeOffset _retryAfter;
 
@@ -51,6 +52,7 @@ public sealed class TelemetryClient : ITelemetryClient, IAsyncDisposable, IDispo
         _storage = storage;
         _time = timeProvider ?? TimeProvider.System;
         _contentVersion = options.ContentVersion;
+        _collectionEnabled = options.InitialCollectionEnabled;
 
         _state = SafeLoadState() ?? new ClientState(Guid.NewGuid(), ConsentState.Unknown);
         SafeSaveState(_state);
@@ -85,6 +87,30 @@ public sealed class TelemetryClient : ITelemetryClient, IAsyncDisposable, IDispo
     public ConsentState Consent
     {
         get { lock (_gate) return _state.Consent; }
+    }
+
+    public bool IsCollectionEnabled
+    {
+        get { lock (_gate) return !_disposed && _collectionEnabled; }
+    }
+
+    public void SetCollectionEnabled(bool enabled)
+    {
+        lock (_gate)
+        {
+            if (_disposed || _collectionEnabled == enabled) return;
+            _collectionEnabled = enabled;
+            if (!enabled)
+            {
+                Safe(_consentLifetime.Cancel);
+                _consentLifetime.Dispose();
+                _consentLifetime = new();
+            }
+            else if (_foreground && !_sessionActive)
+            {
+                StartSession();
+            }
+        }
     }
 
     public Guid InstallId
@@ -159,7 +185,10 @@ public sealed class TelemetryClient : ITelemetryClient, IAsyncDisposable, IDispo
             if (_disposed || _foreground) return;
             _foreground = true;
             if (!_sessionActive || (_backgroundAt is { } at && _time.GetUtcNow() - at >= _options.SessionTimeout))
+            {
+                _sessionActive = false;
                 StartSession();
+            }
             _backgroundAt = null;
         }
     }
@@ -172,6 +201,7 @@ public sealed class TelemetryClient : ITelemetryClient, IAsyncDisposable, IDispo
             _foreground = false;
             _backgroundAt = _time.GetUtcNow();
             if (_sessionActive) EndSession();
+            if (_options.PauseOnBackground) SetCollectionEnabled(false);
         }
         return FlushAsync(cancellationToken);
     }
@@ -185,7 +215,7 @@ public sealed class TelemetryClient : ITelemetryClient, IAsyncDisposable, IDispo
     {
         lock (_gate)
         {
-            if (_disposed || _state.Consent != ConsentState.Granted) return;
+            if (_disposed || !_collectionEnabled || _state.Consent != ConsentState.Granted) return;
             _sessionActive = true;
             _sessionId = Guid.NewGuid();
             _sessionStartedAt = _time.GetUtcNow();
@@ -201,7 +231,7 @@ public sealed class TelemetryClient : ITelemetryClient, IAsyncDisposable, IDispo
             var merged = new Dictionary<string, object?>(props ?? new Dictionary<string, object?>());
             lock (_gate)
             {
-                if (_disposed || _state.Consent != ConsentState.Granted) return;
+                if (_disposed || !_collectionEnabled || _state.Consent != ConsentState.Granted) return;
                 merged["duration_ms"] = Math.Max(0, (long)(_time.GetUtcNow() - _sessionStartedAt).TotalMilliseconds);
                 Track(TelemetryEventNames.SessionEnd, merged);
             }
@@ -211,7 +241,7 @@ public sealed class TelemetryClient : ITelemetryClient, IAsyncDisposable, IDispo
 
     public void Track(string name, IReadOnlyDictionary<string, object?>? props = null)
     {
-        if (Consent != ConsentState.Granted)
+        if (!IsCollectionEnabled || Consent != ConsentState.Granted)
         {
             return;
         }
@@ -229,7 +259,7 @@ public sealed class TelemetryClient : ITelemetryClient, IAsyncDisposable, IDispo
 
         lock (_gate)
         {
-            if (_disposed || _state.Consent != ConsentState.Granted)
+            if (_disposed || !_collectionEnabled || _state.Consent != ConsentState.Granted)
             {
                 return;
             }
@@ -282,7 +312,7 @@ public sealed class TelemetryClient : ITelemetryClient, IAsyncDisposable, IDispo
                 CancellationTokenSource requestLifetime;
                 lock (_gate)
                 {
-                    if (_disposed || _queue.Count == 0 || _state.Consent != ConsentState.Granted || _time.GetUtcNow() < _retryAfter)
+                    if (_disposed || !_collectionEnabled || _queue.Count == 0 || _state.Consent != ConsentState.Granted || _time.GetUtcNow() < _retryAfter)
                     {
                         break;
                     }

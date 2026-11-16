@@ -27,6 +27,27 @@ Windows требует отдельной сборки и проверки на 
 4. Нажать Grant consent. Внизу sample — последние события. Для каждого сценария сверить
    число событий и их свойства со страницей статистики/экспортом сервера.
 
+## Android: отдельный APK для ручной проверки
+
+Для установки через ADB соберите Debug APK со встроенными сборками .NET:
+
+```bash
+dotnet build samples/RTelemetry.Sample.Maui -f net10.0-android \
+  -p:RTelemetryMauiTargetFrameworks=net10.0-android -p:EmbedAssembliesIntoApk=true
+adb devices -l
+adb -s emulator-5554 install samples/RTelemetry.Sample.Maui/bin/Debug/net10.0-android/com.companyname.rtelemetry.sample.maui-Signed.apk
+```
+
+Подставьте серийный номер из `adb devices -l`. Sample обращается к локальному серверу через
+`10.0.2.2:5180`. Перед запуском sample проверьте, что сервер слушает порт 5180 на компьютере.
+Для одного прохода запишите платформу, API, коммит sample, число ожидаемых `ui.click` и
+`ui.miss` и сверку с dashboard и CSV. Используйте только синтетические события в локальном
+проекте.
+
+16.11.2026, `00f73fd`: Debug APK собран без ошибок и предупреждений. В ZIP подтверждены
+сборки RTelemetry для arm64. Android Emulator 37.1.11, API 36 (arm64), на macOS завершился
+с `SIGILL` до загрузки. Установка и цепочка «касание → сервер → статистика» ожидают проверки.
+
 ## Матрица: повторить на Mac Catalyst, Android, iOS и Windows
 
 - [ ] До согласия: 20 нажатий, пустая очередь/сеть/лента. После отзыва то же; очередь стерта.

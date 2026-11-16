@@ -50,13 +50,12 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: '10.0.x'
-      - run: dotnet workload install maui
-      # Workload Apple-платформ требует конкретную минорную версию Xcode (27.0.10742 → 27.1),
-      # а в образе по умолчанию стоит более старая. Выбираем явно; если её нет, падаем здесь с понятной ошибкой.
+          dotnet-version: '10.0.404'
+      # Workload set 10.0.404 включает Mac Catalyst 27.2.10000 и требует Xcode 27.2.
+      - run: dotnet workload install maui --version 10.0.404
       - name: Select Xcode
         run: |
-          sudo xcode-select -s /Applications/Xcode_27.1.app
+          sudo xcode-select -s /Applications/Xcode_27.2.app
           xcodebuild -version
       - run: dotnet build src/RTelemetry.Maui -c Release -warnaserror
       - run: dotnet build samples/RTelemetry.Sample.Maui -c Debug -f net10.0-maccatalyst -p:EnableCodeSigning=false -warnaserror
@@ -84,13 +83,12 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: '10.0.x'
-      - run: dotnet workload install maui
-      # Workload Apple-платформ требует конкретную минорную версию Xcode (27.0.10742 → 27.1),
-      # а в образе по умолчанию стоит более старая. Выбираем явно; если её нет, падаем здесь с понятной ошибкой.
+          dotnet-version: '10.0.404'
+      # Workload set 10.0.404 включает Mac Catalyst 27.2.10000 и требует Xcode 27.2.
+      - run: dotnet workload install maui --version 10.0.404
       - name: Select Xcode
         run: |
-          sudo xcode-select -s /Applications/Xcode_27.1.app
+          sudo xcode-select -s /Applications/Xcode_27.2.app
           xcodebuild -version
       - name: Check release tag
         if: startsWith(github.ref, 'refs/tags/v')

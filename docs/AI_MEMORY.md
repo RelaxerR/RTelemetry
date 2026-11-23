@@ -114,7 +114,9 @@ RTelemetry — универсальная телеметрия RelaxerR Games: N
 
 ## 6. Текущий фокус
 
-- 2026-11-16 — #10: Android sample Debug APK собран на `00f73fd`, установка и доставка событий ожидают рабочего эмулятора или устройства; см. docs/development/manual-checks.md.
+- 2026-11-23 — #10: Android sample на эмуляторе API 36 установлен, click/miss и завершение сессии
+  видны на локальном dashboard. CSV на macOS смешивает CRLF и LF. Результаты и ограничения
+  основной проверки — в docs/development/manual-checks.md.
 
 - 2026-10-12: единая ветка main; release worktrees удалены после проверки включения
   коммитов и сохранения пакетов/TRX в artifacts/worktree-archive-2026-10-12/.

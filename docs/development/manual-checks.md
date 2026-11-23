@@ -46,7 +46,24 @@ adb -s emulator-5554 install samples/RTelemetry.Sample.Maui/bin/Debug/net10.0-an
 
 16.11.2026, `00f73fd`: Debug APK собран без ошибок и предупреждений. В ZIP подтверждены
 сборки RTelemetry для arm64. Android Emulator 37.1.11, API 36 (arm64), на macOS завершился
-с `SIGILL` до загрузки. Установка и цепочка «касание → сервер → статистика» ожидают проверки.
+с `SIGILL` до загрузки.
+
+### Результат 23.11.2026
+
+На macOS в Android Emulator 37.1.11, API 36, `arm64-v8a` загрузился существующий AVD
+с параметрами `-no-window -read-only -no-snapshot -no-audio -gpu swiftshader_indirect`.
+На исходниках `199a80f`, SDK .NET 10.0.404, APK собран без предупреждений, установлен через
+ADB и запущен. Sample доставлял синтетические события на локальный сервер.
+
+- До выдачи согласия и после его отзыва контрольные касания не добавили событий на сервере.
+- После согласия получены 4 `ui.click` по `button` (один с `long_press=true`) и 2 `ui.miss`
+  в промежутке между элементами (`nearest_element=button`). Drag события не добавил.
+- Уход в фон доставил `session.end`. Dashboard показал те же количества и точки на карте.
+- CSV содержит те же 8 записей с учётом `session.start` и `session.end`. На macOS заголовок
+  заканчивается CRLF, строки данных — LF. Строгий парсер отклоняет исходный файл. Сверка
+  записей прошла после приведения окончаний строк к LF.
+
+Это проверка основной цепочки. Расширенная матрица ниже остаётся в [#10](https://github.com/RelaxerR/RTelemetry/issues/10).
 
 ## Матрица: повторить на Mac Catalyst, Android, iOS и Windows
 

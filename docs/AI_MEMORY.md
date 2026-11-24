@@ -117,6 +117,7 @@ RTelemetry — универсальная телеметрия RelaxerR Games: N
 - 2026-11-23 — #10: Android sample на эмуляторе API 36 установлен, click/miss и завершение сессии
   видны на локальном dashboard. CSV на macOS смешивает CRLF и LF. Результаты и ограничения
   основной проверки — в docs/development/manual-checks.md.
+- 2026-11-16 — Apple CI: job maui и pack используют SDK и workload set 10.0.404 с Xcode 27.2. При обновлении сверять совместимость этих версий и наличие Xcode в образе xcode-27.
 
 - 2026-10-12: единая ветка main; release worktrees удалены после проверки включения
   коммитов и сохранения пакетов/TRX в artifacts/worktree-archive-2026-10-12/.

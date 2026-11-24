@@ -27,6 +27,44 @@ Windows требует отдельной сборки и проверки на 
 4. Нажать Grant consent. Внизу sample — последние события. Для каждого сценария сверить
    число событий и их свойства со страницей статистики/экспортом сервера.
 
+## Android: отдельный APK для ручной проверки
+
+Для установки через ADB соберите Debug APK со встроенными сборками .NET:
+
+```bash
+dotnet build samples/RTelemetry.Sample.Maui -f net10.0-android \
+  -p:RTelemetryMauiTargetFrameworks=net10.0-android -p:EmbedAssembliesIntoApk=true
+adb devices -l
+adb -s emulator-5554 install samples/RTelemetry.Sample.Maui/bin/Debug/net10.0-android/com.companyname.rtelemetry.sample.maui-Signed.apk
+```
+
+Подставьте серийный номер из `adb devices -l`. Sample обращается к локальному серверу через
+`10.0.2.2:5180`. Перед запуском sample проверьте, что сервер слушает порт 5180 на компьютере.
+Для одного прохода запишите платформу, API, коммит sample, число ожидаемых `ui.click` и
+`ui.miss` и сверку с dashboard и CSV. Используйте только синтетические события в локальном
+проекте.
+
+16.11.2026, `00f73fd`: Debug APK собран без ошибок и предупреждений. В ZIP подтверждены
+сборки RTelemetry для arm64. Android Emulator 37.1.11, API 36 (arm64), на macOS завершился
+с `SIGILL` до загрузки.
+
+### Результат 23.11.2026
+
+На macOS в Android Emulator 37.1.11, API 36, `arm64-v8a` загрузился существующий AVD
+с параметрами `-no-window -read-only -no-snapshot -no-audio -gpu swiftshader_indirect`.
+На исходниках `199a80f`, SDK .NET 10.0.404, APK собран без предупреждений, установлен через
+ADB и запущен. Sample доставлял синтетические события на локальный сервер.
+
+- До выдачи согласия и после его отзыва контрольные касания не добавили событий на сервере.
+- После согласия получены 4 `ui.click` по `button` (один с `long_press=true`) и 2 `ui.miss`
+  в промежутке между элементами (`nearest_element=button`). Drag события не добавил.
+- Уход в фон доставил `session.end`. Dashboard показал те же количества и точки на карте.
+- CSV содержит те же 8 записей с учётом `session.start` и `session.end`. На macOS заголовок
+  заканчивается CRLF, строки данных — LF. Строгий парсер отклоняет исходный файл. Сверка
+  записей прошла после приведения окончаний строк к LF.
+
+Это проверка основной цепочки. Расширенная матрица ниже остаётся в [#10](https://github.com/RelaxerR/RTelemetry/issues/10).
+
 ## Матрица: повторить на Mac Catalyst, Android, iOS и Windows
 
 - [ ] До согласия: 20 нажатий, пустая очередь/сеть/лента. После отзыва то же; очередь стерта.

@@ -49,7 +49,7 @@ public sealed class IndexModel(IEventStore store, TimeProvider time) : PageModel
                 e.Sequence.ToString(CultureInfo.InvariantCulture), e.Name, e.TimestampUtc.ToString("O"),
                 e.ReceivedAtUtc.ToString("O"), e.AppVersion, e.ContentVersion ?? "", e.Platform,
                 JsonSerializer.Serialize(e.Props)];
-            csv.AppendLine(string.Join(",", fields.Select(CsvCell)));
+            csv.Append(string.Join(",", fields.Select(CsvCell))).Append("\r\n");
         }
         return File(Encoding.UTF8.GetBytes(csv.ToString()), "text/csv; charset=utf-8", "rtelemetry.csv");
     }

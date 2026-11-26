@@ -130,6 +130,47 @@ public sealed class ServerTests
         Assert.Equal(HttpStatusCode.OK, (await dashboard.GetAsync("/?to=0001-01-01")).StatusCode);
     }
 
+    [Theory]
+    [InlineData(0)]
+    [InlineData(3)]
+    public async Task CsvUsesCrLfAndPreservesQuotedFields(int count)
+    {
+        using var factory = new ServerFactory();
+        using var dashboard = factory.DashboardClient();
+        var store = factory.Services.GetRequiredService<IEventStore>();
+        var batch = Batch();
+        const string version = "beta, \"quoted\"\nline\r\nnext";
+        var now = DateTimeOffset.UtcNow;
+        var events = Enumerable.Range(1, count).Select(sequence =>
+            StoredEvent.From(batch, batch.Events[0] with
+            {
+                Id = Guid.NewGuid(), Sequence = sequence, AppVersion = version
+            }, now)).ToArray();
+        await store.AppendAsync(events.Reverse().ToArray(), default);
+
+        var csv = await dashboard.GetStringAsync("/?handler=Csv");
+        // Strip quoted fields before checking record separators, preserving embedded newlines.
+        var separators = System.Text.RegularExpressions.Regex.Replace(csv, "\"(?:\"\"|[^\"])*\"", "");
+        Assert.Equal(count + 1, separators.Split("\r\n").Length - 1);
+        Assert.DoesNotContain("\n", separators.Replace("\r\n", ""));
+        Assert.DoesNotContain("\r", separators.Replace("\r\n", ""));
+        using var parser = new Microsoft.VisualBasic.FileIO.TextFieldParser(new StringReader(csv));
+        parser.SetDelimiters(",");
+        parser.HasFieldsEnclosedInQuotes = true;
+        parser.TrimWhiteSpace = false;
+        Assert.Equal(12, parser.ReadFields()!.Length);
+        foreach (var expected in events)
+        {
+            var fields = parser.ReadFields()!;
+            Assert.Equal(12, fields.Length);
+            Assert.Equal(expected.Id.ToString(), fields[1]);
+            Assert.Equal(expected.Sequence.ToString(), fields[4]);
+            Assert.Equal(version, fields[8]);
+            Assert.Equal(JsonSerializer.Serialize(expected.Props), fields[11]);
+        }
+        Assert.True(parser.EndOfData);
+    }
+
     [Fact]
     public async Task RetentionUsesReceiptTimeAndKeepsRecentEvents()
     {

@@ -93,12 +93,14 @@ Postgres 16 хранит данные в volume собственного compose
 Для отдельного стенда TBG задайте `RTELEMETRY_PROJECT=tbg` и выберите свободный
 `RTELEMETRY_HOST_PORT`. Параметры сохраняйте вне каталога сборки, в файле с правами
 `600`; для пароля БД подходит `openssl rand -hex 32` (без разделителей строки подключения).
-Все последующие команды выполняйте с одним именем Compose-проекта и файлом окружения:
+Все последующие команды выполняйте с одним именем Compose-проекта и файлом окружения.
+Команда `port server 8080` возвращает адрес и порт, опубликованные на хосте для этого стенда.
 
 ```sh
 docker compose -p rtelemetry-qa --env-file ../qa.env config --quiet
 docker compose -p rtelemetry-qa --env-file ../qa.env up -d --build --wait
-curl --fail --retry 10 --retry-all-errors --retry-delay 1 http://127.0.0.1:5180/health
+qa_upstream=$(docker compose -p rtelemetry-qa --env-file ../qa.env port server 8080) &&
+  curl --fail --retry 10 --retry-all-errors --retry-delay 1 "http://${qa_upstream}/health"
 ```
 
 Для nginx на хосте определите адрес шлюза сети, через который proxy обращается к контейнеру:
@@ -157,7 +159,11 @@ PrivateTmp=true
 WantedBy=multi-user.target
 ```
 
-Пример nginx после получения сертификата для реального домена:
+После получения сертификата для своего домена подставьте в `proxy_pass` вместо
+`UPSTREAM_ADDRESS` адрес с портом. Для Compose скопируйте вывод команды
+`docker compose -p rtelemetry-qa --env-file ../qa.env port server 8080`
+(например, `127.0.0.1:5181`). Для systemd возьмите адрес с портом из
+`ASPNETCORE_URLS` в `/etc/rtelemetry.env` (в примере выше — `127.0.0.1:5180`).
 
 ```nginx
 server {
@@ -176,7 +182,7 @@ server {
     error_log /dev/null crit;
     client_max_body_size 1m;
     location / {
-        proxy_pass http://127.0.0.1:5180;
+        proxy_pass http://UPSTREAM_ADDRESS;
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto $scheme;

@@ -98,7 +98,7 @@ Postgres 16 хранит данные в volume собственного compose
 ```sh
 docker compose -p rtelemetry-qa --env-file ../qa.env config --quiet
 docker compose -p rtelemetry-qa --env-file ../qa.env up -d --build --wait
-curl --fail http://127.0.0.1:5180/health
+curl --fail --retry 10 --retry-all-errors --retry-delay 1 http://127.0.0.1:5180/health
 ```
 
 Для nginx на хосте определите адрес шлюза сети, через который proxy обращается к контейнеру:

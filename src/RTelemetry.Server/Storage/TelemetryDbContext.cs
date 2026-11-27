@@ -20,6 +20,7 @@ public sealed class EventRow
 public sealed class TelemetryDbContext(DbContextOptions<TelemetryDbContext> options) : DbContext(options)
 {
     public DbSet<EventRow> Events => Set<EventRow>();
+    public DbSet<DeletedInstall> DeletedInstalls => Set<DeletedInstall>();
     protected override void OnModelCreating(ModelBuilder modelBuilder) => ConfigureModel(modelBuilder);
 
     internal static void ConfigureModel(ModelBuilder modelBuilder)
@@ -34,5 +35,15 @@ public sealed class TelemetryDbContext(DbContextOptions<TelemetryDbContext> opti
         e.HasIndex(x => new { x.Project, x.SessionId, x.Sequence });
         e.HasIndex(x => x.InstallId);
         e.HasIndex(x => x.ReceivedAtUtc);
+
+        var deleted = modelBuilder.Entity<DeletedInstall>();
+        deleted.ToTable("DeletedInstalls");
+        deleted.HasKey(x => x.InstallId);
+        deleted.Property(x => x.InstallId).ValueGeneratedNever();
     }
+}
+
+public sealed class DeletedInstall
+{
+    public Guid InstallId { get; set; }
 }

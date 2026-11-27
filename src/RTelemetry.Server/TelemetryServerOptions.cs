@@ -23,6 +23,24 @@ public sealed class TelemetryServerOptions
 public sealed class ProjectOptions
 {
     public string ApiKey { get; set; } = "";
+
+    /// <summary>HTTPS-эндпоинт проверки установки перед приёмом событий.</summary>
+    public string InstallAuthorizationUrl { get; set; } = "";
+
+    /// <summary>Общий серверный ключ для InstallAuthorizationUrl.</summary>
+    public string InstallAuthorizationKey { get; set; } = "";
+
+    public bool RequireInstallAuthorization { get; set; }
+
+    internal bool HasValidAuthorizationConfiguration()
+    {
+        if (!RequireInstallAuthorization && InstallAuthorizationUrl.Length == 0 && InstallAuthorizationKey.Length == 0)
+            return true;
+
+        return Uri.TryCreate(InstallAuthorizationUrl, UriKind.Absolute, out var url) && url.Scheme == Uri.UriSchemeHttps &&
+            url.UserInfo.Length == 0 && url.Query.Length == 0 && url.Fragment.Length == 0 &&
+            !string.IsNullOrWhiteSpace(InstallAuthorizationKey);
+    }
 }
 
 /// <summary>Доступ к фронту статистики по HTTP Basic. Пустой пароль — фронт выключен (404).</summary>

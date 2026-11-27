@@ -45,6 +45,12 @@ public sealed class TelemetryClientOptions
 
     /// <summary>При уходе в фон закрывать временное разрешение; приложение подтверждает его после возврата.</summary>
     public bool PauseOnBackground { get; set; }
+
+    /// <summary>Требовать срок разрешения на сбор и свежую внешнюю проверку перед каждой отправкой.</summary>
+    public bool RequireUploadValidation { get; set; }
+
+    /// <summary>Максимальный возраст неотправленного события. По умолчанию ограничено только число событий.</summary>
+    public TimeSpan? MaxPendingEventAge { get; set; }
     public TimeSpan RetryInitialDelay { get; set; } = TimeSpan.FromSeconds(2);
     public TimeSpan RetryMaxDelay { get; set; } = TimeSpan.FromMinutes(5);
     public long MaxQueueBytes { get; set; } = 16 * 1024 * 1024;
@@ -63,6 +69,7 @@ public sealed class TelemetryClientOptions
             throw new ArgumentOutOfRangeException(nameof(RetryInitialDelay));
         if (MaxQueueBytes < 2) throw new ArgumentOutOfRangeException(nameof(MaxQueueBytes));
         if (FlushInterval <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(FlushInterval));
+        if (MaxPendingEventAge <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(MaxPendingEventAge));
     }
 
     private static string DetectPlatform()

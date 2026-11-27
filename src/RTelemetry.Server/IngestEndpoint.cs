@@ -8,7 +8,7 @@ using RTelemetry.Server.Storage;
 namespace RTelemetry.Server;
 
 /// <summary><c>POST /v1/batches</c>: проверка ключа проекта и схемы, запись в хранилище.</summary>
-public static class IngestEndpoint
+internal static class IngestEndpoint
 {
     public static async Task<IResult> HandleAsync(
         [FromHeader(Name = TelemetryProtocol.ApiKeyHeader)] string? apiKey,
@@ -16,6 +16,7 @@ public static class IngestEndpoint
         IOptionsSnapshot<TelemetryServerOptions> options,
         IEventStore store,
         IngestRateLimiter limiter,
+        InstallAuthorization authorization,
         HttpContext context,
         TimeProvider time,
         CancellationToken cancellationToken)
@@ -38,11 +39,13 @@ public static class IngestEndpoint
             return Results.StatusCode(StatusCodes.Status429TooManyRequests);
         }
 
+        var authorized = await authorization.CheckAsync(project, batch.InstallId, cancellationToken);
+        if (authorized != StatusCodes.Status204NoContent) return Results.StatusCode(authorized);
+
         var receivedAt = time.GetUtcNow();
         var stored = batch.Events.Select(e => StoredEvent.From(batch, e, receivedAt)).ToList();
-        await store.AppendAsync(stored, cancellationToken);
-
-        return Results.Ok(new { accepted = stored.Count });
+        var accepted = await store.AppendAsync(stored, cancellationToken);
+        return accepted == 0 ? Results.StatusCode(StatusCodes.Status410Gone) : Results.Ok(new { accepted });
     }
 
     internal static bool KeyMatches(string? provided, string expected)

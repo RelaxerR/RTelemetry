@@ -9,9 +9,11 @@ public sealed class FileTelemetryStorage : ITelemetryStorage
     private readonly string _statePath;
     private readonly string _queuePath;
     private readonly long _maxQueueBytes;
+    private readonly bool _bindQueueToInstall;
     private readonly object _gate = new();
+    private Guid _queueInstallId;
 
-    public FileTelemetryStorage(string directory, long maxQueueBytes = 16 * 1024 * 1024)
+    public FileTelemetryStorage(string directory, long maxQueueBytes = 16 * 1024 * 1024, bool bindQueueToInstall = false)
     {
         if (string.IsNullOrWhiteSpace(directory)) throw new ArgumentException("Storage directory is required.", nameof(directory));
         if (maxQueueBytes < 2) throw new ArgumentOutOfRangeException(nameof(maxQueueBytes));
@@ -20,25 +22,46 @@ public sealed class FileTelemetryStorage : ITelemetryStorage
         _statePath = Path.Combine(root, "state.json");
         _queuePath = Path.Combine(root, "queue.json");
         _maxQueueBytes = maxQueueBytes;
+        _bindQueueToInstall = bindQueueToInstall;
         // A temp file was never committed. Never resurrect it after consent withdrawal.
         File.Delete(_statePath + ".tmp");
         File.Delete(_queuePath + ".tmp");
+        if (bindQueueToInstall)
+        {
+            // У очереди прежнего формата нет проверяемой привязки к установке.
+            File.Delete(_queuePath);
+            foreach (var path in Directory.EnumerateFiles(root, "queue-*.json.tmp"))
+                File.Delete(path);
+        }
     }
 
     public ClientState? LoadState()
     {
-        var state = Read<ClientState>(_statePath, 4096);
-        return state is { InstallId: var id } && id != Guid.Empty && Enum.IsDefined(state.Consent) ? state : null;
+        lock (_gate)
+        {
+            var state = Read<ClientState>(_statePath, 4096);
+            if (state is not { InstallId: var id } || id == Guid.Empty || !Enum.IsDefined(state.Consent))
+                return null;
+            _queueInstallId = id;
+            return state;
+        }
     }
 
     public void SaveState(ClientState state)
     {
-        lock (_gate) Write(_statePath, JsonSerializer.SerializeToUtf8Bytes(state, TelemetryProtocol.JsonOptions));
+        lock (_gate)
+        {
+            _queueInstallId = state.InstallId;
+            Write(_statePath, JsonSerializer.SerializeToUtf8Bytes(state, TelemetryProtocol.JsonOptions));
+        }
     }
 
-    public IReadOnlyList<TelemetryEvent> LoadQueue() =>
-        (Read<List<TelemetryEvent>>(_queuePath, _maxQueueBytes) ?? [])
-        .Where(e => e is not null && e.Id != Guid.Empty && TelemetrySchema.IsValidName(e.Name)).ToList();
+    public IReadOnlyList<TelemetryEvent> LoadQueue()
+    {
+        lock (_gate)
+            return (Read<List<TelemetryEvent>>(CurrentQueuePath, _maxQueueBytes) ?? [])
+                .Where(e => e is not null && e.Id != Guid.Empty && TelemetrySchema.IsValidName(e.Name)).ToList();
+    }
 
     public void SaveQueue(IReadOnlyList<TelemetryEvent> events)
     {
@@ -64,7 +87,7 @@ public sealed class FileTelemetryStorage : ITelemetryStorage
                 output.Write(records[i]);
             }
             output.WriteByte((byte)']');
-            Write(_queuePath, output.ToArray());
+            Write(CurrentQueuePath, output.ToArray());
         }
     }
 
@@ -72,10 +95,14 @@ public sealed class FileTelemetryStorage : ITelemetryStorage
     {
         lock (_gate)
         {
-            File.Delete(_queuePath);
-            File.Delete(_queuePath + ".tmp");
+            File.Delete(CurrentQueuePath);
+            File.Delete(CurrentQueuePath + ".tmp");
         }
     }
+
+    private string CurrentQueuePath => _bindQueueToInstall
+        ? Path.Combine(Path.GetDirectoryName(_queuePath)!, $"queue-{_queueInstallId:N}.json")
+        : _queuePath;
 
     private T? Read<T>(string path, long maxBytes)
     {

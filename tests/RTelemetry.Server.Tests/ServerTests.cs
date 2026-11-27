@@ -13,7 +13,7 @@ using RTelemetry.Server.Storage;
 
 namespace RTelemetry.Server.Tests;
 
-public sealed class ServerFactory(int ipLimit = 120, int projectLimit = 600) : WebApplicationFactory<Program>
+public sealed class ServerFactory(int ipLimit = 120, int projectLimit = 600, HttpMessageHandler? authorizationHandler = null) : WebApplicationFactory<Program>
 {
     private readonly string _directory = Path.Combine(Path.GetTempPath(), "rtelemetry-server-test-" + Guid.NewGuid());
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -30,6 +30,17 @@ public sealed class ServerFactory(int ipLimit = 120, int projectLimit = 600) : W
             ["RTelemetry:RateLimit:RequestsPerMinutePerIp"] = ipLimit.ToString(),
             ["RTelemetry:RateLimit:RequestsPerMinutePerProject"] = projectLimit.ToString()
         }));
+        if (authorizationHandler is not null)
+        {
+            builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["RTelemetry:Projects:test:RequireInstallAuthorization"] = "true",
+                ["RTelemetry:Projects:test:InstallAuthorizationUrl"] = "https://study.invalid/api/research/authorization",
+                ["RTelemetry:Projects:test:InstallAuthorizationKey"] = "test-server-key",
+            }));
+            builder.ConfigureServices(services => services.AddHttpClient("InstallAuthorization")
+                .ConfigurePrimaryHttpMessageHandler(() => authorizationHandler));
+        }
     }
     protected override void Dispose(bool disposing)
     {
@@ -82,7 +93,64 @@ public sealed class ServerTests
         Assert.Equal(HttpStatusCode.Unauthorized, (await ingest.DeleteAsync($"/v1/admin/installs/{batch.InstallId}")).StatusCode);
         ingest.DefaultRequestHeaders.Add("X-RTelemetry-Admin-Key", "admin-test-key");
         Assert.Equal(HttpStatusCode.OK, (await ingest.DeleteAsync($"/v1/admin/installs/{batch.InstallId}")).StatusCode);
+        Assert.Equal(HttpStatusCode.Gone, (await ingest.PostAsJsonAsync("/v1/batches", batch)).StatusCode);
         Assert.DoesNotContain(batch.Events[0].Id.ToString(), await dashboard.GetStringAsync("/?handler=Csv"));
+    }
+
+    [Fact]
+    public async Task AuthorizationIsRequiredForEveryBatchAndNeverAcceptsAnError()
+    {
+        var statuses = new Queue<HttpStatusCode>([HttpStatusCode.ServiceUnavailable, HttpStatusCode.NoContent,
+            HttpStatusCode.Forbidden, HttpStatusCode.Unauthorized]);
+        var batch = Batch();
+        using var handler = new AuthorizationHandler(async (request, token) =>
+        {
+            Assert.Equal(HttpMethod.Post, request.Method);
+            Assert.Equal("/api/research/authorization", request.RequestUri!.AbsolutePath);
+            Assert.Equal("test-server-key", Assert.Single(request.Headers.GetValues("X-Research-Authorization-Key")));
+            using var body = JsonDocument.Parse(await request.Content!.ReadAsStreamAsync(token));
+            Assert.Equal(batch.InstallId, body.RootElement.GetProperty("telemetryInstallId").GetGuid());
+            Assert.Single(body.RootElement.EnumerateObject());
+            return new HttpResponseMessage(statuses.Dequeue());
+        });
+        using var factory = new ServerFactory(authorizationHandler: handler);
+        using var client = factory.IngestClient();
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, (await client.PostAsJsonAsync("/v1/batches", batch)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.PostAsJsonAsync("/v1/batches", batch)).StatusCode);
+        Assert.Equal(HttpStatusCode.Gone, (await client.PostAsJsonAsync("/v1/batches", batch)).StatusCode);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, (await client.PostAsJsonAsync("/v1/batches", batch)).StatusCode);
+        Assert.Empty(statuses);
+    }
+
+    [Fact]
+    public async Task DeletionWinsOverABatchAlreadyWaitingForAuthorization()
+    {
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var authorized = new TaskCompletionSource<HttpResponseMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var handler = new AuthorizationHandler((_, _) =>
+        {
+            started.SetResult();
+            return authorized.Task;
+        });
+        using var factory = new ServerFactory(authorizationHandler: handler);
+        using var client = factory.IngestClient();
+        client.DefaultRequestHeaders.Add("X-RTelemetry-Admin-Key", "admin-test-key");
+        var batch = Batch();
+        var posting = client.PostAsJsonAsync("/v1/batches", batch);
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(HttpStatusCode.OK, (await client.DeleteAsync($"/v1/admin/installs/{batch.InstallId}")).StatusCode);
+        authorized.SetResult(new HttpResponseMessage(HttpStatusCode.NoContent));
+
+        Assert.Equal(HttpStatusCode.Gone, (await posting).StatusCode);
+        using var dashboard = factory.DashboardClient();
+        Assert.DoesNotContain(batch.Events[0].Id.ToString(), await dashboard.GetStringAsync("/?handler=Csv"));
+    }
+
+    private sealed class AuthorizationHandler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> send)
+        : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            send(request, cancellationToken);
     }
 
     [Fact]
@@ -218,12 +286,32 @@ public sealed class PostgresTests
             await foreach (var item in store.ReadAsync("test", DateOnly.FromDateTime(now.UtcDateTime), DateOnly.FromDateTime(now.UtcDateTime), default)) rows.Add(item);
             Assert.Contains(rows, x => x.Id == e.Id && x.Props!["page"].GetString() == "home");
             Assert.Equal(1, await store.DeleteInstallAsync(e.InstallId, default));
-            var old = e with { Id = Guid.NewGuid(), ReceivedAtUtc = now.AddDays(-100) };
-            await store.AppendAsync([old, e], default);
+            var old = e with { Id = Guid.NewGuid(), InstallId = Guid.NewGuid(), ReceivedAtUtc = now.AddDays(-100) };
+            var laterStore = new PostgresEventStore(new Factory(options));
+            Assert.Equal(1, await laterStore.AppendAsync([old, e], default));
             Assert.True(await store.DeleteBeforeAsync(now.AddDays(-90), default) >= 1);
-            Assert.True(await db.Events.AnyAsync(x => x.Id == e.Id));
+            Assert.False(await db.Events.AnyAsync(x => x.Id == e.Id));
         }
         finally { await store.DeleteInstallAsync(e.InstallId, default); }
+    }
+
+    [PostgresFact]
+    public async Task ConcurrentAppendAndDeleteNeverResurrectAnInstallation()
+    {
+        var options = new DbContextOptionsBuilder<TelemetryDbContext>()
+            .UseNpgsql(Environment.GetEnvironmentVariable("RTELEMETRY_TEST_POSTGRES")).Options;
+        await using var db = new TelemetryDbContext(options);
+        await db.Database.MigrateAsync();
+        var writer = new PostgresEventStore(new Factory(options));
+        var admin = new PostgresEventStore(new Factory(options));
+        var batch = ServerTests.Batch();
+        var e = StoredEvent.From(batch, batch.Events[0], DateTimeOffset.UtcNow);
+
+        await Task.WhenAll(writer.AppendAsync([e], default), admin.DeleteInstallAsync(e.InstallId, default),
+            writer.AppendAsync([e with { Id = Guid.NewGuid() }], default));
+
+        Assert.False(await db.Events.AnyAsync(x => x.InstallId == e.InstallId));
+        Assert.Equal(0, await writer.AppendAsync([e], default));
     }
     private sealed class Factory(DbContextOptions<TelemetryDbContext> options) : IDbContextFactory<TelemetryDbContext>
     {

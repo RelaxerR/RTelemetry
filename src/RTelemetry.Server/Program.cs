@@ -11,7 +11,11 @@ builder.WebHost.ConfigureKestrel(kestrel => kestrel.Limits.MaxRequestBodySize = 
 builder.Services.AddOptions<TelemetryServerOptions>()
     .Bind(builder.Configuration.GetSection(TelemetryServerOptions.SectionName))
     .Validate(o => o.RetentionDays > 0 && o.RateLimit.RequestsPerMinutePerIp > 0 && o.RateLimit.RequestsPerMinutePerProject > 0,
-        "Retention and rate limits must be positive").ValidateOnStart();
+        "Retention and rate limits must be positive")
+    .Validate(o => o.Projects.Values.All(project => project.HasValidAuthorizationConfiguration()),
+        "Install authorization requires a valid HTTPS URL and a server key").ValidateOnStart();
+builder.Services.AddHttpClient<InstallAuthorization>(client => client.Timeout = TimeSpan.FromSeconds(5))
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false });
 builder.Services.AddSingleton(TimeProvider.System);
 var storage = builder.Configuration.GetSection("RTelemetry:Storage").Get<StorageOptions>() ?? new();
 if (storage.Provider.Equals("Postgres", StringComparison.OrdinalIgnoreCase))

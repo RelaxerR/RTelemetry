@@ -1,0 +1,18 @@
+# Apply after docker-compose.yml. Replace the environment so the pilot exposes
+# only the tbg project, regardless of the generic project settings.
+services:
+  server:
+    environment: !override
+      ASPNETCORE_ENVIRONMENT: Production
+      RTelemetry__Storage__Provider: Postgres
+      RTelemetry__Storage__ConnectionString: Host=postgres;Database=rtelemetry;Username=rtelemetry;Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+      RTelemetry__Projects__tbg__ApiKey: ${RTELEMETRY_PROJECT_KEY:?Set RTELEMETRY_PROJECT_KEY}
+      RTelemetry__Projects__tbg__RequireInstallAuthorization: "true"
+      RTelemetry__Projects__tbg__InstallAuthorizationUrl: ${RTELEMETRY_INSTALL_AUTHORIZATION_URL:?Set RTELEMETRY_INSTALL_AUTHORIZATION_URL}
+      RTelemetry__Projects__tbg__InstallAuthorizationKey: ${RTELEMETRY_INSTALL_AUTHORIZATION_KEY:?Set RTELEMETRY_INSTALL_AUTHORIZATION_KEY}
+      RTelemetry__AdminKey: ${RTELEMETRY_ADMIN_KEY:?Set RTELEMETRY_ADMIN_KEY}
+      RTelemetry__Dashboard__User: admin
+      RTelemetry__Dashboard__Password: ${RTELEMETRY_DASHBOARD_PASSWORD:?Set RTELEMETRY_DASHBOARD_PASSWORD}
+      RTelemetry__RetentionDays: "90"
+      RTelemetry__TrustedProxies__0: ${RTELEMETRY_TRUSTED_PROXY:-127.0.0.1}
+      Logging__LogLevel__Microsoft.EntityFrameworkCore.Database.Command: "None"

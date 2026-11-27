@@ -16,6 +16,12 @@ public interface ITelemetryClient
     /// <summary>Приостанавливает сбор/отправку без стирания очереди и изменения согласия.</summary>
     void SetCollectionEnabled(bool enabled);
 
+    /// <summary>Устанавливает одноразовую проверку сайта для каждой попытки отправки, включая повторы.</summary>
+    void ConfigureConsentGate(Func<Guid, CancellationToken, Task<bool>> validateUploadAsync);
+
+    /// <summary>Задаёт исключительную границу локального сбора. Null закрывает сбор и отправку, сохраняя очередь.</summary>
+    void SetCollectionDeadline(DateTimeOffset? expiresAtUtc);
+
     /// <summary>Случайный идентификатор установки (не устройства и не аккаунта).</summary>
     Guid InstallId { get; }
 
@@ -28,6 +34,9 @@ public interface ITelemetryClient
 
     /// <summary>Отзыв согласия с новым <see cref="InstallId"/>: прошлые события больше не связываются с будущими.</summary>
     void ResetInstallId();
+
+    /// <summary>Привязывает выдаваемый сайтом идентификатор, очищая очередь и согласие предыдущей установки.</summary>
+    void SetInstallId(Guid installId);
 
     /// <summary>Версия контента для следующих событий (например, после загрузки другой истории).</summary>
     void SetContentVersion(string? contentVersion);

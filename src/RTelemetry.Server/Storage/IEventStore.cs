@@ -44,7 +44,8 @@ public interface IEventStore
     Task<int> DeleteInstallAsync(Guid installId, CancellationToken cancellationToken);
     Task<int> DeleteBeforeAsync(DateTimeOffset cutoff, CancellationToken cancellationToken);
 
-    Task AppendAsync(IReadOnlyList<StoredEvent> events, CancellationToken cancellationToken);
+    /// <summary>Возвращает число событий из установок, для которых не зарегистрировано удаление.</summary>
+    Task<int> AppendAsync(IReadOnlyList<StoredEvent> events, CancellationToken cancellationToken);
 
     /// <summary>События, принятые в днях [from; to] по UTC.</summary>
     IAsyncEnumerable<StoredEvent> ReadAsync(string? project, DateOnly from, DateOnly to, CancellationToken cancellationToken);

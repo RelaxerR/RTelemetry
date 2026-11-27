@@ -70,7 +70,7 @@ curl -X DELETE "https://telemetry.example.com/v1/admin/installs/INSTALL_GUID" \
 запросы к разным экземплярам сервера. Маркер не участвует в 90-дневной очистке событий.
 Для нового участия сайт выдаёт новый UUID.
 
-Для TBG можно требовать свежую проверку сайта для каждой пачки. Укажите
+Пилот TBG требует свежую проверку сайта для каждой пачки. При запуске без Compose укажите
 `RTelemetry__Projects__tbg__RequireInstallAuthorization=true`,
 `RTelemetry__Projects__tbg__InstallAuthorizationUrl=https://<сайт>/api/research/authorization`
 и `RTelemetry__Projects__tbg__InstallAuthorizationKey`. Этот ключ хранится только на
@@ -103,18 +103,32 @@ docker compose up --build -d
 
 Postgres 16 хранит данные в volume собственного compose-проекта. Опубликован только
 порт сервера на `127.0.0.1`. По умолчанию порт `5180`, код проекта `app`.
-Для отдельного стенда TBG задайте `RTELEMETRY_PROJECT=tbg` и выберите свободный
-`RTELEMETRY_HOST_PORT`. Параметры сохраняйте вне каталога сборки, в файле с правами
-`600`; для пароля БД подходит `openssl rand -hex 32` (без разделителей строки подключения).
-Для стенда пилота задайте `RTELEMETRY_REQUIRE_INSTALL_AUTHORIZATION=true`,
-`RTELEMETRY_INSTALL_AUTHORIZATION_URL` и `RTELEMETRY_INSTALL_AUTHORIZATION_KEY`.
-Все последующие команды выполняйте с одним именем Compose-проекта и файлом окружения.
+Для пилота TBG применяйте `docker-compose.pilot.yml` поверх `docker-compose.yml`.
+Нужен Docker Compose с поддержкой [тега `!override`](https://docs.docker.com/reference/compose-file/merge/#replace-value).
+Пара файлов настраивает только проект `tbg` и задаёт
+`RTelemetry__Projects__tbg__RequireInstallAuthorization=true` без параметра окружения
+для отключения проверки. Compose требует обе переменные окружения:
+
+```ini
+RTELEMETRY_INSTALL_AUTHORIZATION_URL=https://site.example.com/api/research/authorization
+RTELEMETRY_INSTALL_AUTHORIZATION_KEY=REPLACE_WITH_SHARED_SITE_SECRET
+```
+
+Используйте фактический HTTPS-адрес сайта и тот же серверный секрет, который сайт
+проверяет в `X-Research-Authorization-Key`. Выберите свободный `RTELEMETRY_HOST_PORT`
+и храните параметры вне каталога сборки в файле с правами `600`.
+Для пароля БД подходит `openssl rand -hex 32` (без разделителей строки подключения).
+Используйте одинаковые параметры Compose для всех операций с этим стендом.
 Команда `port server 8080` возвращает адрес и порт, опубликованные на хосте для этого стенда.
 
 ```sh
-docker compose -p rtelemetry-qa --env-file ../qa.env config --quiet
-docker compose -p rtelemetry-qa --env-file ../qa.env up -d --build --wait
-qa_upstream=$(docker compose -p rtelemetry-qa --env-file ../qa.env port server 8080) &&
+pilot_compose() {
+  docker compose -p rtelemetry-qa --env-file ../qa.env \
+    -f docker-compose.yml -f docker-compose.pilot.yml "$@"
+}
+pilot_compose config --quiet
+pilot_compose up -d --build --wait
+qa_upstream=$(pilot_compose port server 8080) &&
   curl --fail --retry 10 --retry-all-errors --retry-delay 1 "http://${qa_upstream}/health"
 ```
 
@@ -140,7 +154,7 @@ Dashboard и CSV возвращали 401 без Basic, DELETE отвергал 
 Для QA с синтетическими событиями используется отдельный том. Перед началом сбора
 участников владелец отдельно утверждает хранение резервных копий и обработку отзыва
 при восстановлении. Включение БД телеметрии в бэкапы сайта требует явной настройки.
-Безопасная остановка QA: `docker compose -p rtelemetry-qa --env-file ../qa.env stop`.
+Для остановки QA выполните `pilot_compose stop`.
 
 ## systemd и nginx с HTTPS
 
@@ -175,8 +189,8 @@ WantedBy=multi-user.target
 ```
 
 После получения сертификата для своего домена подставьте в `proxy_pass` вместо
-`UPSTREAM_ADDRESS` адрес с портом. Для Compose скопируйте вывод команды
-`docker compose -p rtelemetry-qa --env-file ../qa.env port server 8080`
+`UPSTREAM_ADDRESS` адрес с портом. Для пилота в Compose скопируйте вывод команды
+`pilot_compose port server 8080`
 (например, `127.0.0.1:5181`). Для systemd возьмите адрес с портом из
 `ASPNETCORE_URLS` в `/etc/rtelemetry.env` (в примере выше — `127.0.0.1:5180`).
 

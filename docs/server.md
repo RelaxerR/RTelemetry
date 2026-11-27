@@ -88,9 +88,44 @@ RTELEMETRY_DASHBOARD_PASSWORD в окружении или локальном `.
 docker compose up --build -d
 ```
 
-Postgres 16 хранит данные в volume. Сервер без root слушает loopback хоста
-127.0.0.1:5180, проект — app. Для HTTPS нужен reverse proxy.
-Docker в текущей среде отсутствует, compose не проверен запуском.
+Postgres 16 хранит данные в volume собственного compose-проекта. Опубликован только
+порт сервера на `127.0.0.1`. По умолчанию порт `5180`, код проекта `app`.
+Для отдельного стенда TBG задайте `RTELEMETRY_PROJECT=tbg` и выберите свободный
+`RTELEMETRY_HOST_PORT`. Параметры сохраняйте вне каталога сборки, в файле с правами
+`600`; для пароля БД подходит `openssl rand -hex 32` (без разделителей строки подключения).
+Все последующие команды выполняйте с одним именем Compose-проекта и файлом окружения.
+Команда `port server 8080` возвращает адрес и порт, опубликованные на хосте для этого стенда.
+
+```sh
+docker compose -p rtelemetry-qa --env-file ../qa.env config --quiet
+docker compose -p rtelemetry-qa --env-file ../qa.env up -d --build --wait
+qa_upstream=$(docker compose -p rtelemetry-qa --env-file ../qa.env port server 8080) &&
+  curl --fail --retry 10 --retry-all-errors --retry-delay 1 "http://${qa_upstream}/health"
+```
+
+Для nginx на хосте определите адрес шлюза сети, через который proxy обращается к контейнеру:
+
+```sh
+docker network inspect rtelemetry-qa_default --format '{{(index .IPAM.Config 0).Gateway}}'
+```
+
+Запишите этот конкретный IP в `RTELEMETRY_TRUSTED_PROXY`, повторите `up -d --wait`.
+При смене адреса сети обновите настройку. У каждого окружения свои ключ проекта,
+пароль Dashboard, admin key и PostgreSQL. Клиенту выдаётся только ключ проекта.
+Проверьте приём синтетической пачки, её появление в Dashboard и CSV, затем удаление из
+обоих по `installId`. `GET /health` проверяет только процесс.
+
+26.11.2026 на отдельном QA compose-проекте с PostgreSQL 16 на Linux проверены
+сборка образа, приём синтетической пачки, дедупликация, Dashboard, CSV и удаление
+по `installId` (повторное удаление вернуло `0`). Внешний клиент повторил проверку
+через `https://telemetry.relaxerr-games.ru` с проверкой сертификата Let’s Encrypt.
+Dashboard и CSV возвращали 401 без Basic, DELETE отвергал ключ проекта.
+После удаления экспорт выбранной сессии содержал только заголовок.
+
+Для QA с синтетическими событиями используется отдельный том. Перед началом сбора
+участников владелец отдельно утверждает хранение резервных копий и обработку отзыва
+при восстановлении. Включение БД телеметрии в бэкапы сайта требует явной настройки.
+Безопасная остановка QA: `docker compose -p rtelemetry-qa --env-file ../qa.env stop`.
 
 ## systemd и nginx с HTTPS
 
@@ -124,12 +159,18 @@ PrivateTmp=true
 WantedBy=multi-user.target
 ```
 
-Пример nginx после получения сертификата для реального домена:
+После получения сертификата для своего домена подставьте в `proxy_pass` вместо
+`UPSTREAM_ADDRESS` адрес с портом. Для Compose скопируйте вывод команды
+`docker compose -p rtelemetry-qa --env-file ../qa.env port server 8080`
+(например, `127.0.0.1:5181`). Для systemd возьмите адрес с портом из
+`ASPNETCORE_URLS` в `/etc/rtelemetry.env` (в примере выше — `127.0.0.1:5180`).
 
 ```nginx
 server {
     listen 80;
     server_name telemetry.example.com;
+    access_log off;
+    error_log /dev/null crit;
     return 301 https://$host$request_uri;
 }
 server {
@@ -138,9 +179,10 @@ server {
     ssl_certificate /etc/letsencrypt/live/telemetry.example.com/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/telemetry.example.com/privkey.pem;
     access_log off;
+    error_log /dev/null crit;
     client_max_body_size 1m;
     location / {
-        proxy_pass http://127.0.0.1:5180;
+        proxy_pass http://UPSTREAM_ADDRESS;
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto $scheme;
@@ -152,7 +194,11 @@ ForwardedHeaders доверяет loopback proxy по умолчанию ASP.NET
 внешнего proxy задайте точные IP через `RTelemetry__TrustedProxies__0` (и следующие индексы)
 и ограничьте сетевой доступ. Не доверяйте произвольному X-Forwarded-For из интернета.
 Проверяйте журналы nginx/systemd: IP и сырые события не должны сохраняться.
-Реальный деплой HTTPS, systemd и nginx не выполнялся.
+На QA-стенде проверены отдельный виртуальный хост nginx, сертификат своего
+поддомена и доступность основного сайта после reload. В конфигурации обоих
+HTTP/HTTPS-блоков отключены access log и запись клиентских ошибок; маркер
+тестового запроса отсутствовал в активных журналах nginx. Для этого стенда
+использован Compose. Приведённый выше unit systemd отдельно не проверялся.
 
 ## Тесты
 

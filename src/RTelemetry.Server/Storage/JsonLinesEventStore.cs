@@ -21,18 +21,21 @@ public sealed class JsonLinesEventStore : IEventStore
         Directory.CreateDirectory(_root);
     }
 
-    public async Task AppendAsync(IReadOnlyList<StoredEvent> events, CancellationToken cancellationToken)
+    public async Task<int> AppendAsync(IReadOnlyList<StoredEvent> events, CancellationToken cancellationToken)
     {
         await _writeLock.WaitAsync(cancellationToken);
         try
         {
-            foreach (var group in events.GroupBy(e => (e.Project, Day: DateOnly.FromDateTime(e.ReceivedAtUtc.UtcDateTime))))
+            var allowed = events.GroupBy(e => e.InstallId)
+                .Where(group => !File.Exists(DeletedInstallPath(group.Key))).SelectMany(group => group).ToList();
+            foreach (var group in allowed.GroupBy(e => (e.Project, Day: DateOnly.FromDateTime(e.ReceivedAtUtc.UtcDateTime))))
             {
                 var directory = Path.Combine(_root, group.Key.Project);
                 Directory.CreateDirectory(directory);
                 var lines = group.Select(e => JsonSerializer.Serialize(e, TelemetryProtocol.JsonOptions));
                 await File.AppendAllLinesAsync(FilePath(group.Key.Project, group.Key.Day), lines, cancellationToken);
             }
+            return allowed.Count;
         }
         finally
         {
@@ -83,16 +86,23 @@ public sealed class JsonLinesEventStore : IEventStore
     }
 
     public Task<int> DeleteInstallAsync(Guid installId, CancellationToken cancellationToken) =>
-        DeleteAsync(e => e.InstallId == installId, cancellationToken);
+        DeleteAsync(e => e.InstallId == installId, cancellationToken, installId);
 
     public Task<int> DeleteBeforeAsync(DateTimeOffset cutoff, CancellationToken cancellationToken) =>
         DeleteAsync(e => e.ReceivedAtUtc < cutoff, cancellationToken);
 
-    private async Task<int> DeleteAsync(Func<StoredEvent, bool> predicate, CancellationToken cancellationToken)
+    private async Task<int> DeleteAsync(Func<StoredEvent, bool> predicate, CancellationToken cancellationToken, Guid? installId = null)
     {
         await _writeLock.WaitAsync(cancellationToken);
         try
         {
+            if (installId is { } id)
+            {
+                var marker = DeletedInstallPath(id);
+                Directory.CreateDirectory(Path.GetDirectoryName(marker)!);
+                using var stream = new FileStream(marker, FileMode.OpenOrCreate, FileAccess.Write);
+                stream.Flush(flushToDisk: true);
+            }
             var deleted = 0;
             foreach (var file in Directory.EnumerateFiles(_root, "*.jsonl", SearchOption.AllDirectories))
             {
@@ -120,4 +130,6 @@ public sealed class JsonLinesEventStore : IEventStore
 
     private string FilePath(string project, DateOnly day) =>
         Path.Combine(_root, project, $"{day:yyyy-MM-dd}.jsonl");
+
+    private string DeletedInstallPath(Guid installId) => Path.Combine(_root, ".deleted-installs", installId.ToString("N"));
 }

@@ -17,10 +17,20 @@ namespace RTelemetry.Server.Storage.Migrations
         {
 #pragma warning disable 612, 618
             modelBuilder
-                .HasAnnotation("ProductVersion", "10.0.4")
+                .HasAnnotation("ProductVersion", "10.0.14")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
+
+            modelBuilder.Entity("RTelemetry.Server.Storage.DeletedInstall", b =>
+                {
+                    b.Property<Guid>("InstallId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("InstallId");
+
+                    b.ToTable("DeletedInstalls", (string)null);
+                });
 
             modelBuilder.Entity("RTelemetry.Server.Storage.EventRow", b =>
                 {

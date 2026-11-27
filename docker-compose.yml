@@ -22,6 +22,9 @@ services:
       - RTelemetry__Storage__Provider=Postgres
       - RTelemetry__Storage__ConnectionString=Host=postgres;Database=rtelemetry;Username=rtelemetry;Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
       - RTelemetry__Projects__${RTELEMETRY_PROJECT:-app}__ApiKey=${RTELEMETRY_PROJECT_KEY:?Set RTELEMETRY_PROJECT_KEY}
+      - RTelemetry__Projects__${RTELEMETRY_PROJECT:-app}__RequireInstallAuthorization=${RTELEMETRY_REQUIRE_INSTALL_AUTHORIZATION:-false}
+      - RTelemetry__Projects__${RTELEMETRY_PROJECT:-app}__InstallAuthorizationUrl=${RTELEMETRY_INSTALL_AUTHORIZATION_URL:-}
+      - RTelemetry__Projects__${RTELEMETRY_PROJECT:-app}__InstallAuthorizationKey=${RTELEMETRY_INSTALL_AUTHORIZATION_KEY:-}
       - RTelemetry__AdminKey=${RTELEMETRY_ADMIN_KEY:?Set RTELEMETRY_ADMIN_KEY}
       - RTelemetry__Dashboard__User=admin
       - RTelemetry__Dashboard__Password=${RTELEMETRY_DASHBOARD_PASSWORD:?Set RTELEMETRY_DASHBOARD_PASSWORD}
